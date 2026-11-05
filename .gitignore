@@ -1,0 +1,30 @@
+# Virtual Environments
+venv/
+.venv/
+env/
+ENV/
+
+# Python Cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Environment & IDE
+.env
+.vscode/
+.idea/
+
+# Frontend builds & packages
+frontend/node_modules/
+frontend/dist/
+node_modules/
+
+# Temporary & scratch files
+scratch/
+tmp/
+
+# Explicit Whitelist for Mantra Reference Artifacts
+!mantra.wav
+!reference_features.json
+!ref_maha_mrityunjay.json
