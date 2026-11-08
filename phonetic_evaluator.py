@@ -1,25 +1,28 @@
 """
 phonetic_evaluator.py
 Local, word-by-word and phoneme-level evaluation module for Sanskrit mantra chanting.
-Specialized for the Mahā Mṛtyuñjaya Mantra:
-  "त्र्यम्बकं यजामहे सुगन्धिं पुष्टिवर्धनम् उर्वारुकमिव बन्धनान् मृत्योर्मुक्षीय मामृतात्"
+Specialized for the Ganesha Shloka (Vakratuṇḍa Mahākāya):
+  "वक्रतुण्ड महाकाय सूर्यकोटि समप्रभ निर्विघ्नं कुरुमेदेव सर्वकार्येषु सर्वदा"
 
 Evaluates:
   1. Word-level alignment and acoustic match score (local DTW cosine similarity)
-  2. Short vs. long vowel duration ratios (e.g. ya vs jā in yajāmahe, u vs vā in urvārukamiva)
-  3. Consonant aspiration (/dh/ in sugandhim, bandhanān)
-  4. Retroflex articulation (/ṣṭ/ in puṣṭivardhanam)
-  5. Conjunct articulation (/tr/ in tryambakam, /kṣ/ in mṛtyormukṣīya)
-  6. Safe-failure logic: acceptable / review / inconclusive
+  2. Short vs. long vowel duration ratios (e.g. ma vs hā, ku vs me, va vs dā)
+  3. Consonant aspiration (/bh/ in samaprabha, /gh/ in nirvighnam)
+  4. Retroflex articulation (/ṇḍ/ in vakratuṇḍa, /ṭi/ in sūryakoṭi, /ṣu/ in sarvakāryeṣu)
+  5. Safe-failure logic: acceptable / review / inconclusive
 """
 
 import os
 import sys
 import json
+import copy
+import warnings
 import numpy as np
 import librosa
 from sklearn.preprocessing import StandardScaler
 from librosa.sequence import dtw
+
+warnings.filterwarnings('ignore', module='librosa')
 
 if sys.stdout.encoding != 'utf-8':
     try:
@@ -28,7 +31,7 @@ if sys.stdout.encoding != 'utf-8':
         pass
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DEFAULT_ANNOTATION_FILE = os.path.join(BASE_DIR, "ref_maha_mrityunjay.json")
+DEFAULT_ANNOTATION_FILE = os.path.join(BASE_DIR, "ganesha_shloka.json")
 DEFAULT_REF_AUDIO = os.path.join(BASE_DIR, "mantra.wav")
 
 # =============================================================================
@@ -37,17 +40,17 @@ DEFAULT_REF_AUDIO = os.path.join(BASE_DIR, "mantra.wav")
 CONFIG = {
     # Alignment thresholds
     "MIN_SEGMENT_DURATION_MS": 30.0,       # Segments shorter than 30ms -> inconclusive
-    "MIN_ALIGNMENT_CONFIDENCE": 0.40,      # Confidence below 0.4 -> inconclusive
+    "MIN_ALIGNMENT_CONFIDENCE": 0.20,      # Only extreme outliers (< 0.20) -> inconclusive
 
     # Word-level score thresholds
-    "WORD_ACCEPTABLE_THRESHOLD": 65.0,     # >= 65% is acceptable
-    "WORD_REVIEW_THRESHOLD": 45.0,         # 45% - 64% needs review, < 45% is poor
+    "WORD_ACCEPTABLE_THRESHOLD": 48.0,     # >= 48% is acceptable (natural human variation)
+    "WORD_REVIEW_THRESHOLD": 30.0,         # 30% - 47% needs review, < 30% needs practice
 
-    # Phonetic contrast thresholds
-    "VOWEL_RATIO_TOLERANCE": 0.30,         # Measured ratio within ±30% of target/ref -> acceptable
-    "CONSONANT_SIMILARITY_THRESHOLD": 0.65,# Spectral similarity >= 0.65 -> acceptable
-    "ASPIRATION_ENERGY_RATIO_MIN": 0.12,   # Minimum high-freq breathiness ratio for aspirated stops
-    "RETROFLEX_CENTROID_DIFF_HZ": 600,     # Maximum allowable deviation in spectral centroid
+    # Phonetic contrast thresholds (tolerant to microphone EQ and vocal tract differences)
+    "VOWEL_RATIO_TOLERANCE": 0.50,         # Measured ratio within ±50% of target/ref -> acceptable
+    "CONSONANT_SIMILARITY_THRESHOLD": 0.50,# Spectral similarity >= 0.50 -> acceptable
+    "ASPIRATION_ENERGY_RATIO_MIN": 0.05,   # Minimum high-freq breathiness ratio for aspirated stops
+    "RETROFLEX_CENTROID_DIFF_HZ": 1500,    # Maximum allowable deviation in spectral centroid
 }
 
 
@@ -115,41 +118,77 @@ def align_user_to_reference(
     ref_times_arr = librosa.frames_to_time(ref_frames, sr=ref_sr, hop_length=hop_length)
     user_times_arr = librosa.frames_to_time(user_frames, sr=user_sr, hop_length=hop_length)
 
+    is_partial_chant = user_duration < 4.0
+
     aligned_words = []
     for w in ref_words:
         r_start = w["start_sec"]
         r_end = w["end_sec"]
 
-        # Find warping path indices matching the reference interval
-        mask = (ref_times_arr >= r_start) & (ref_times_arr <= r_end)
-        if np.any(mask):
-            matched_user_times = user_times_arr[mask]
-            u_start = float(np.min(matched_user_times))
-            u_end = float(np.max(matched_user_times))
-            
-            # Confidence based on density of matching path frames
-            expected_user_dur = (r_end - r_start) * (user_duration / (ref_duration + 1e-9))
-            actual_user_dur = u_end - u_start
-            dur_ratio = actual_user_dur / (expected_user_dur + 1e-9)
-            confidence = float(np.clip(1.0 - abs(1.0 - dur_ratio), 0.0, 1.0))
+        if is_partial_chant and precomputed_wp is None:
+            # Subsequence DTW: match individual reference word anywhere in short user recording
+            r_s_frame = int(r_start * ref_sr / hop_length)
+            r_e_frame = max(r_s_frame + 2, int(r_end * ref_sr / hop_length))
+            ref_w_comb = ref_comb[:, r_s_frame:r_e_frame]
+
+            if ref_w_comb.shape[1] >= 2 and user_comb.shape[1] >= 2:
+                D_sub, wp_sub = dtw(X=ref_w_comb, Y=user_comb, subseq=True)
+                sub_cost = float(D_sub[-1, -1] / max(1, len(wp_sub)))
+                matched_u_frames = wp_sub[:, 1]
+                u_s = float(librosa.frames_to_time(np.min(matched_u_frames), sr=user_sr, hop_length=hop_length))
+                u_e = float(librosa.frames_to_time(np.max(matched_u_frames), sr=user_sr, hop_length=hop_length))
+
+                # Allow human variability in subseq cost (< 4.2)
+                if sub_cost < 4.2:
+                    u_start = u_s
+                    u_end = u_e
+                    confidence = float(np.clip(1.0 - (sub_cost / 4.2), 0.35, 1.0))
+                else:
+                    u_start = 0.0
+                    u_end = 0.0
+                    confidence = 0.0
+            else:
+                u_start = 0.0
+                u_end = 0.0
+                confidence = 0.0
         else:
-            # Fallback to linear projection if warping path missed the segment
-            u_start = float(r_start * (user_duration / ref_duration))
-            u_end = float(r_end * (user_duration / ref_duration))
-            confidence = 0.35
+            # Full recitation: global DTW mapping
+            mask = (ref_times_arr >= r_start) & (ref_times_arr <= r_end)
+            if np.any(mask):
+                matched_user_times = user_times_arr[mask]
+                u_start = float(np.min(matched_user_times))
+                u_end = float(np.max(matched_user_times))
+
+                expected_user_dur = (r_end - r_start) * (user_duration / (ref_duration + 1e-9))
+                actual_user_dur = u_end - u_start
+                dur_ratio = actual_user_dur / (expected_user_dur + 1e-9)
+                if 0.25 <= dur_ratio <= 3.5:
+                    confidence = float(np.clip(1.0 - 0.20 * abs(1.0 - dur_ratio), 0.50, 1.0))
+                else:
+                    confidence = float(np.clip(1.0 - 0.40 * abs(1.0 - dur_ratio), 0.25, 0.75))
+            else:
+                u_start = float(r_start * (user_duration / ref_duration))
+                u_end = float(r_end * (user_duration / ref_duration))
+                confidence = 0.50
 
         # Bound checks
-        u_start = max(0.0, min(u_start, user_duration))
-        u_end = max(u_start, min(u_end, user_duration))
-        u_dur_ms = (u_end - u_start) * 1000.0
-
-        if u_dur_ms < CONFIG["MIN_SEGMENT_DURATION_MS"]:
-            confidence = min(confidence, 0.25)
+        if u_end > u_start:
+            u_start = max(0.0, min(u_start, user_duration))
+            u_end = max(u_start, min(u_end, user_duration))
+            u_dur_ms = (u_end - u_start) * 1000.0
+            if u_dur_ms < CONFIG["MIN_SEGMENT_DURATION_MS"]:
+                confidence = min(confidence, 0.25)
+        else:
+            u_start = 0.0
+            u_end = 0.0
+            confidence = 0.0
 
         aligned_words.append({
             "index": w["index"],
             "devanagari": w["devanagari"],
             "iast": w["iast"],
+            "raw_ref_start_sec": w.get("raw_start_sec", r_start),
+            "raw_ref_end_sec": w.get("raw_end_sec", r_end),
             "ref_start_sec": r_start,
             "ref_end_sec": r_end,
             "ref_duration_sec": r_end - r_start,
@@ -174,6 +213,9 @@ def compute_local_word_match(
     r_end: float
 ) -> float:
     """Computes acoustic match score (0-100%) between aligned word intervals."""
+    if u_end <= u_start or (u_end - u_start) < 0.04:
+        return 0.0
+
     u_s_sample = int(u_start * user_sr)
     u_e_sample = max(u_s_sample + 64, int(u_end * user_sr))
     r_s_sample = int(r_start * ref_sr)
@@ -182,33 +224,51 @@ def compute_local_word_match(
     u_seg = user_audio[u_s_sample:u_e_sample]
     r_seg = ref_audio[r_s_sample:r_e_sample]
 
-    if len(u_seg) < 256 or len(r_seg) < 256:
-        return 50.0
+    u_rms = float(np.mean(librosa.feature.rms(y=u_seg)[0])) if len(u_seg) > 0 else 0.0
+    if len(u_seg) < 256 or len(r_seg) < 256 or u_rms < 0.008:
+        return 0.0
 
-    # Extract MFCCs — DROP mfcc[0] (overall energy) for speaker independence
+    # Extract MFCCs — DROP mfcc[0] (overall energy) for speaker loudness independence
     u_mfcc = librosa.feature.mfcc(y=u_seg, sr=user_sr, n_mfcc=13)[1:, :]  # shape (12, T)
     r_mfcc = librosa.feature.mfcc(y=r_seg, sr=ref_sr, n_mfcc=13)[1:, :]
 
-    # Per-segment CMVN (Cepstral Mean & Variance Normalization)
+    # Per-segment normalization and delta trajectories
     u_scaled = StandardScaler().fit_transform(u_mfcc.T).T
     r_scaled = StandardScaler().fit_transform(r_mfcc.T).T
 
-    # Add Chroma CENS for tonal similarity (captures melodic pitch movement)
-    u_chroma = librosa.feature.chroma_cens(y=u_seg, sr=user_sr, n_chroma=12)
-    r_chroma = librosa.feature.chroma_cens(y=r_seg, sr=ref_sr, n_chroma=12)
+    try:
+        u_width = 9
+        if u_scaled.shape[1] < u_width:
+            u_width = u_scaled.shape[1] if u_scaled.shape[1] % 2 != 0 else u_scaled.shape[1] - 1
+        if u_width >= 3:
+            u_delta = librosa.feature.delta(u_scaled, width=u_width)
+        else:
+            u_delta = np.zeros_like(u_scaled)
 
-    # Combine: 12 MFCCs + 12 Chroma = 24-dim feature vector
-    u_comb = np.vstack([u_scaled, u_chroma])
-    r_comb = np.vstack([r_scaled, r_chroma])
+        r_width = 9
+        if r_scaled.shape[1] < r_width:
+            r_width = r_scaled.shape[1] if r_scaled.shape[1] % 2 != 0 else r_scaled.shape[1] - 1
+        if r_width >= 3:
+            r_delta = librosa.feature.delta(r_scaled, width=r_width)
+        else:
+            r_delta = np.zeros_like(r_scaled)
+
+        u_comb = np.vstack([u_scaled, u_delta])
+        r_comb = np.vstack([r_scaled, r_delta])
+    except Exception:
+        u_comb = u_scaled
+        r_comb = r_scaled
 
     try:
-        D, wp = dtw(u_comb, r_comb, metric="cosine")
+        D, wp = dtw(u_comb, r_comb, metric="euclidean")
         dist = D[-1, -1] / max(1, len(wp))
-        # Calibrated decay: exp(-dist / 2.2) -> valid human recitation scores 75-95%
-        score = float(100.0 * np.exp(-dist / 2.2))
+        if dist >= 7.5:
+            score = 0.0
+        else:
+            score = float(100.0 * np.exp(-dist / 5.2))
         return float(np.clip(score, 0.0, 100.0))
     except Exception:
-        return 60.0
+        return 0.0
 
 
 def check_vowel_duration_ratio(
@@ -267,9 +327,14 @@ def check_vowel_duration_ratio(
             "reason": "Sub-spans too short for reliable energy estimation."
         }
 
-    # Count voiced/high-energy samples
-    s_rms = librosa.feature.rms(y=s_seg)[0]
-    l_rms = librosa.feature.rms(y=l_seg)[0]
+    # Count voiced/high-energy samples with hop_length=128
+    fl_s = min(512, max(64, len(s_seg)))
+    hl_s = min(128, max(32, fl_s // 4))
+    s_rms = librosa.feature.rms(y=s_seg, frame_length=fl_s, hop_length=hl_s)[0]
+
+    fl_l = min(512, max(64, len(l_seg)))
+    hl_l = min(128, max(32, fl_l // 4))
+    l_rms = librosa.feature.rms(y=l_seg, frame_length=fl_l, hop_length=hl_l)[0]
 
     s_voiced_frames = np.sum(s_rms > (np.mean(s_rms) * 0.5))
     l_voiced_frames = np.sum(l_rms > (np.mean(l_rms) * 0.5))
@@ -410,14 +475,41 @@ def evaluate_phonetics(
 ) -> dict:
     """
     Top-level master evaluation function.
-    Evaluates user audio against the reference Mahā Mṛtyuñjaya annotations.
+    Evaluates user audio against the reference Ganesha Shloka annotations.
     """
     annotations = load_ref_annotations(annotation_path)
-    ref_words = annotations.get("words", [])
+    ref_words_raw = annotations.get("words", [])
 
-    # Load audios
-    user_audio, user_sr = librosa.load(user_audio_path, sr=None)
-    ref_audio, ref_sr = librosa.load(ref_audio_path, sr=None)
+    # Load and trim both audios at consistent sr=16000
+    user_audio_raw, user_sr = librosa.load(user_audio_path, sr=16000)
+    user_audio, user_trim_idx = librosa.effects.trim(user_audio_raw, top_db=30)
+    user_trim_offset_sec = float(user_trim_idx[0]) / user_sr
+
+    ref_audio_raw, ref_sr = librosa.load(ref_audio_path, sr=16000)
+    ref_audio, ref_trim_idx = librosa.effects.trim(ref_audio_raw, top_db=30)
+    ref_trim_offset_sec = float(ref_trim_idx[0]) / ref_sr
+
+    # Shift reference timestamps by ref_trim_offset_sec so they align with trimmed ref_audio
+    ref_words = copy.deepcopy(ref_words_raw)
+    for w in ref_words:
+        w["raw_start_sec"] = float(w["start_sec"])
+        w["raw_end_sec"]   = float(w["end_sec"])
+        w["start_sec"]     = max(0.0, w["raw_start_sec"] - ref_trim_offset_sec)
+        w["end_sec"]       = max(0.0, w["raw_end_sec"]   - ref_trim_offset_sec)
+        for c in w.get("phonetic_contrasts", []):
+            if "sub_start_sec" in c:
+                c["sub_start_sec"] = max(0.0, c["sub_start_sec"] - ref_trim_offset_sec)
+                c["sub_end_sec"]   = max(0.0, c["sub_end_sec"]   - ref_trim_offset_sec)
+            if "short_vowel_sub_span" in c:
+                c["short_vowel_sub_span"] = [
+                    max(0.0, c["short_vowel_sub_span"][0] - ref_trim_offset_sec),
+                    max(0.0, c["short_vowel_sub_span"][1] - ref_trim_offset_sec),
+                ]
+            if "long_vowel_sub_span" in c:
+                c["long_vowel_sub_span"] = [
+                    max(0.0, c["long_vowel_sub_span"][0] - ref_trim_offset_sec),
+                    max(0.0, c["long_vowel_sub_span"][1] - ref_trim_offset_sec),
+                ]
 
     # 1. Word-level alignment
     aligned_words = align_user_to_reference(
@@ -475,19 +567,26 @@ def evaluate_phonetics(
                 )
             contrast_results.append(res)
 
+        # Check segment energy (detect silence / unvoiced segments)
+        u_seg_for_vad = user_audio[int(u_start * user_sr):max(int(u_start * user_sr) + 64, int(u_end * user_sr))]
+        u_seg_rms = float(np.mean(librosa.feature.rms(y=u_seg_for_vad)[0])) if len(u_seg_for_vad) > 0 else 0.0
+
         # Word status determination
-        if conf < CONFIG["MIN_ALIGNMENT_CONFIDENCE"] or (u_dur * 1000.0) < CONFIG["MIN_SEGMENT_DURATION_MS"]:
+        # Inconclusive ONLY when there is pure silence or essentially zero segment duration
+        if (u_dur * 1000.0) < CONFIG["MIN_SEGMENT_DURATION_MS"] or u_seg_rms < 0.003 or match_score < 15.0 or conf < 0.20:
             word_status = "inconclusive"
             inconclusive_count += 1
+        elif match_score >= CONFIG["WORD_ACCEPTABLE_THRESHOLD"]:
+            word_status = "acceptable"
+            acceptable_count += 1
         else:
-            # Check if any contrast failed
-            any_review = any(cr["status"] == "review" for cr in contrast_results)
-            if match_score >= CONFIG["WORD_ACCEPTABLE_THRESHOLD"] and not any_review:
-                word_status = "acceptable"
-                acceptable_count += 1
-            else:
-                word_status = "review"
-                review_count += 1
+            word_status = "review"
+            review_count += 1
+
+        raw_u_start = round(u_start + user_trim_offset_sec, 3)
+        raw_u_end   = round(u_end + user_trim_offset_sec, 3)
+        raw_r_start = round(word_info.get("raw_ref_start_sec", r_start + ref_trim_offset_sec), 3)
+        raw_r_end   = round(word_info.get("raw_ref_end_sec", r_end + ref_trim_offset_sec), 3)
 
         evaluated_words.append({
             "index": word_info["index"],
@@ -495,10 +594,12 @@ def evaluate_phonetics(
             "iast": word_info["iast"],
             "word_match_score": round(match_score, 1),
             "status": word_status,
-            "user_start_sec": u_start,
-            "user_end_sec": u_end,
-            "ref_start_sec": r_start,
-            "ref_end_sec": r_end,
+            "user_start_sec": raw_u_start,
+            "user_end_sec": raw_u_end,
+            "ref_start_sec": raw_r_start,
+            "ref_end_sec": raw_r_end,
+            "trimmed_user_start_sec": round(u_start, 3),
+            "trimmed_user_end_sec": round(u_end, 3),
             "duration_sec": u_dur,
             "alignment_confidence": conf,
             "contrasts": contrast_results
@@ -516,7 +617,9 @@ def evaluate_phonetics(
         "phonetic_evaluation": {
             "model_version": "hybrid_heuristic_v1",
             "summary": summary,
-            "words": evaluated_words
+            "words": evaluated_words,
+            "ref_trim_offset_sec": ref_trim_offset_sec,
+            "user_trim_offset_sec": user_trim_offset_sec,
         }
     }
 

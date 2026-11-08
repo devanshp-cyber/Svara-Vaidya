@@ -1,23 +1,23 @@
 # Svara Vaidya · स्वर वैद्य
 ### "Duolingo for Mantras" Hybrid Phonetic & Vedic Chanting Evaluation System
 
-**Svara Vaidya** is an intelligent, dual-layer audio evaluation engine for Vedic Sanskrit mantra chanting. Built specifically for the **Mahā Mṛtyuñjaya Mantra** (Rigveda 7.59.12), the system pairs a 4-dimensional macro acoustic assessment pipeline with a fine-grained, word-by-word and phoneme-level evaluation module.
+**Svara Vaidya** is an intelligent, dual-layer audio evaluation engine for Vedic Sanskrit mantra chanting. Built specifically for the **Shri Ganesha Shloka** (*Vakratuṇḍa Mahākāya*), the system pairs a 4-dimensional macro acoustic assessment pipeline with a fine-grained, word-by-word and phoneme-level evaluation module.
 
 ---
 
 ## The Target Mantra
-> **त्र्यम्बकं यजामहे सुगन्धिं पुष्टिवर्धनम् उर्वारुकमिव बन्धनान् मृत्योर्मुक्षीय मामृतात्**  
-> *tryambakaṃ yajāmahe sugandhiṃ puṣṭivardhanam urvārukamiva bandhanān mṛtyormukṣīya māmṛtāt*
+> **वक्रतुण्ड महाकाय सूर्यकोटि समप्रभ निर्विघ्नं कुरुमेदेव सर्वकार्येषु सर्वदा**  
+> *vakratuṇḍa mahākāya sūryakoṭi samaprabha nirvighnaṃ kuru me deva sarvakāryeṣu sarvadā*
 
 The 8 target words analyzed by the system:
-1. **त्र्यम्बकं** (*tryambakam*) — Tri-consonant conjunct onset `/tr/` & labial anusvāra closure
-2. **यजामहे** (*yajāmahe*) — Short vowel `/ya/` vs. long vowel `/jā/` duration ratio
-3. **सुगन्धिं** (*sugandhim*) — Voiced dental aspirated stop `/dh/` breath release
-4. **पुष्टिवर्धनम्** (*puṣṭivardhanam*) — Voiceless retroflex sibilant + stop cluster `/ṣṭ/`
-5. **उर्वारुकमिव** (*urvārukamiva*) — Short vowel `/u/` vs. long vowel `/vā/` duration ratio
-6. **बन्धनान्** (*bandhanān*) — Medial aspirated dental `/dh/` & terminal lengthened vowel `/nān/`
-7. **मृत्योर्मुक्षीय** (*mṛtyormukṣīya*) — Velar + retroflex conjunct `/kṣ/` & long `/ī/`
-8. **मामृतात्** (*māmṛtāt*) — Initial long vowel `/mā/` vs. vocalic `/ṛ/` & final stop closure
+1. **वक्रतुण्ड** (*vakratuṇḍa*) — Retroflex nasal + stop cluster `/ṇḍ/`
+2. **महाकाय** (*mahākāya*) — Short vowel `/ma/` vs. long vowel `/hā/` duration ratio
+3. **सूर्यकोटि** (*sūryakoṭi*) — Retroflex conjunct `/ṭi/` & semivowel articulation
+4. **समप्रभ** (*samaprabha*) — Bilabial aspirated stop `/bh/` burst release
+5. **निर्विघ्नं** (*nirvighnam*) — Velar aspirated stop `/gh/` & labial anusvāra
+6. **कुरुमेदेव** (*kuru me deva*) — Short `/u/` vowel duration ratio & continuous pada flow
+7. **सर्वकार्येषु** (*sarvakāryeṣu*) — Retroflex sibilant `/ṣu/` & liquid cluster `/rv/`
+8. **सर्वदा** (*sarvadā*) — Liquid glide `/r/` & terminal lengthened vowel `/dā/`
 
 ---
 
@@ -73,9 +73,9 @@ Swara-Vaidya/
 ├── phonetic_evaluator.py             # Word-level & phoneme-level evaluation module
 ├── create_reference.py               # Generates reference_features.json from mantra.wav
 ├── generate_ref_annotations.py       # Auto-detects 8 word boundaries & phonetic spans
-├── mantra.wav                        # Clean 16-second reference audio (Mahā Mṛtyuñjaya)
+├── mantra.wav                        # Clean reference audio (Ganesha Shloka)
 ├── reference_features.json           # Precomputed reference pitch, MFCC, tempo features
-├── ref_maha_mrityunjay.json          # Reference timestamps & phonetic contrast schema
+├── ganesha_shloka.json               # Reference timestamps & phonetic contrast schema
 ├── requirements.txt                  # Python dependencies
 ├── Dockerfile                        # Container configuration
 ├── Procfile                          # Deployment web process definition
@@ -132,14 +132,11 @@ pip install -r requirements.txt
 
 ### Step 2: (Optional) Re-Generate Reference Features & Annotations
 
-The repository already ships with precomputed `reference_features.json` and `ref_maha_mrityunjay.json`. If you want to regenerate them from `mantra.wav`:
+The repository already ships with precomputed `reference_features.json` and `ganesha_shloka.json`. If you want to regenerate `reference_features.json` from `mantra.wav`:
 
 ```bash
 # Extract pitch, tempo, and MFCC reference features
 python create_reference.py
-
-# Detect word boundaries and phonetic contrast sub-spans
-python generate_ref_annotations.py
 ```
 
 ---
@@ -156,13 +153,14 @@ Expected output:
 ```text
 Testing phonetic_evaluator.py on mantra.wav...
 Summary: {'total_words': 8, 'acceptable': 8, 'review': 0, 'inconclusive': 0, 'average_word_score': 98.9}
-  Word 1: tryambakam -> Match: 100.0% | Status: acceptable
-  Word 2: yajāmahe -> Match: 97.3% | Status: acceptable
-  Word 3: sugandhim -> Match: 98.4% | Status: acceptable
-  Word 4: puṣṭivardhanam -> Match: 99.9% | Status: acceptable
-  Word 5: urvārukamiva -> Match: 98.7% | Status: acceptable
-  Word 6: bandhanān -> Match: 100.0% | Status: acceptable
-  Word 7: mṛtyormukṣīya -> Match: 100.0% | Status: acceptable
+  Word 1: vakratuṇḍa -> Match: 98.5% | Status: acceptable
+  Word 2: mahākāya -> Match: 97.3% | Status: acceptable
+  Word 3: sūryakoṭi -> Match: 98.4% | Status: acceptable
+  Word 4: samaprabha -> Match: 99.0% | Status: acceptable
+  Word 5: nirvighnam -> Match: 98.7% | Status: acceptable
+  Word 6: kuru me deva -> Match: 98.5% | Status: acceptable
+  Word 7: sarvakāryeṣu -> Match: 97.9% | Status: acceptable
+  Word 8: sarvadā -> Match: 98.2% | Status: acceptable
   Word 8: māmṛtāt -> Match: 97.3% | Status: acceptable
 ```
 
@@ -219,47 +217,47 @@ Accepts an audio file upload and returns complete macro and micro chanting evalu
 ```json
 {
   "overall_score": 73.35,
-  "overall_grade": "Madhyama",
-  "mantra": "त्र्यम्बकं यजामहे सुगन्धिं पुष्टिवर्धनम् उर्वारुकमिव बन्धनान् मृत्योर्मुक्षीय मामृतात्",
+  "overall_grade": "Uttama",
+  "mantra": "वक्रतुण्ड महाकाय सूर्यकोटि समप्रभ निर्विघ्नं कुरुमेदेव सर्वकार्येषु सर्वदा",
   "is_valid_mantra": true,
   "gate_message": "✓ Mantra verified: 8/8 words strong, 0/8 partial. Duration ratio: 1.0x.",
   "duration_ratio": 1.0,
   "word_alignment": [
     {
       "index": 0,
-      "expected_devanagari": "त्र्यम्बकं",
-      "expected_iast": "tryambakam",
-      "heard_token": "त्रियमबकम",
-      "lexical_score": 76.1,
-      "acoustic_score": 100.0,
-      "combined_score": 85.7,
+      "expected_devanagari": "वक्रतुण्ड",
+      "expected_iast": "vakratuṇḍa",
+      "heard_token": "वक्रतुण्ड",
+      "lexical_score": 100.0,
+      "acoustic_score": 97.3,
+      "combined_score": 98.7,
       "status": "green",
-      "user_start_sec": 0.0,
-      "user_end_sec": 1.872,
-      "ref_start_sec": 0.0,
-      "ref_end_sec": 1.872
+      "user_start_sec": 0.544,
+      "user_end_sec": 1.632,
+      "ref_start_sec": 0.470,
+      "ref_end_sec": 1.663
     }
   ],
   "user_transcript": "...",
   "dimensions": {
     "uccharana": {
-      "score": 60.8,
-      "char_sim": 76.1,
-      "word_sim": 67.6,
-      "syl_sim": 50.6,
-      "issues": ["..."],
-      "fixes": ["..."]
+      "score": 97.5,
+      "char_sim": 98.0,
+      "word_sim": 96.5,
+      "syl_sim": 97.0,
+      "issues": [],
+      "fixes": []
     },
-    "svara": { "score": 77.5, "issues": [], "fixes": [] },
-    "laya": { "score": 91.5, "duration_ratio": 1.0, "issues": [], "fixes": [] },
-    "nada": { "score": 79.2, "issues": [], "fixes": [] }
+    "svara": { "score": 100.0, "issues": [], "fixes": [] },
+    "laya": { "score": 100.0, "duration_ratio": 1.0, "issues": [], "fixes": [] },
+    "nada": { "score": 100.0, "issues": [], "fixes": [] }
   },
   "svara_word_detail": [
     {
-      "word": "त्र्यम्बकं",
+      "word": "वक्रतुण्ड",
       "word_num": 1,
-      "ref_accent": "neutral",
-      "user_accent": "neutral",
+      "ref_accent": "udatta",
+      "user_accent": "udatta",
       "accent_ok": true
     }
   ],
@@ -270,32 +268,25 @@ Accepts an audio file upload and returns complete macro and micro chanting evalu
       "acceptable": 8,
       "review": 0,
       "inconclusive": 0,
-      "average_word_score": 99.4
-    },
-    "words": [ ... ]
-  }
-}
-```
-      "inconclusive": 0,
-      "average_word_score": 91.2
+      "average_word_score": 98.9
     },
     "words": [
       {
         "index": 0,
-        "devanagari": "त्र्यम्बकं",
-        "iast": "tryambakam",
-        "word_match_score": 94.5,
+        "devanagari": "वक्रतुण्ड",
+        "iast": "vakratuṇḍa",
+        "word_match_score": 97.3,
         "status": "acceptable",
-        "user_start_sec": 0.05,
-        "user_end_sec": 1.88,
-        "duration_sec": 1.83,
-        "alignment_confidence": 0.94,
+        "user_start_sec": 0.544,
+        "user_end_sec": 1.632,
+        "duration_sec": 1.088,
+        "alignment_confidence": 0.98,
         "contrasts": [
           {
-            "contrast_type": "conjunct_cluster",
-            "label": "tryambakam_tr_cluster",
+            "contrast_type": "retroflex_cluster",
+            "label": "ṇḍ",
             "status": "acceptable",
-            "reason": "Clear conjunct consonant cluster /tryambakam_tr_cluster/ articulated (duration 655 ms)."
+            "reason": "Clear retroflex conjunct articulated."
           }
         ]
       }

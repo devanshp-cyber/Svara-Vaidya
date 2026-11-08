@@ -43,8 +43,8 @@ mfccs = librosa.feature.mfcc(
 
 # Convert numpy arrays → list (required for JSON)
 features = {
-    "mantra_text": "त्र्यम्बकं यजामहे सुगन्धिं पुष्टिवर्धनम् उर्वारुकमिव बन्धनान् मृत्योर्मुक्षीय मामृतात्",
-    "mantra_text_iast": "tryambakam yajāmahe sugandhim puṣṭivardhanam urvārukamiva bandhanān mṛtyormukṣīya māmṛtāt",
+    "mantra_text": "वक्रतुण्ड महाकाय सूर्यकोटि समप्रभ निर्विघ्नं कुरुमेदेव सर्वकार्येषु सर्वदा",
+    "mantra_text_iast": "vakratuṇḍa mahākāya sūryakoṭi samaprabha nirvighnaṃ kuru me deva sarvakāryeṣu sarvadā",
     "pitch_contour": pitch_clean.tolist(),
     "tempo": tempo_val,
     "beat_times": beats.tolist(),               

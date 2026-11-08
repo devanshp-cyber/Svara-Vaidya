@@ -44,6 +44,20 @@ const ScoreBar = ({ label, score, sublabel, height = 6 }) => {
   );
 };
 
+const formatGrade = (g) => {
+  if (!g) return "";
+  if (g.includes("(")) return g;
+  const map = {
+    Uttama: "Uttama (Excellent)",
+    Madhyama: "Madhyama (Intermediate)",
+    Ādi: "Ādi (Foundation)",
+    Adi: "Ādi (Foundation)",
+    Prārambhika: "Prārambhika (Beginner)",
+    Prarambhika: "Prārambhika (Beginner)",
+  };
+  return map[g] || g;
+};
+
 // ─── SVG Radial Gauge ────────────────────────────────────────────────────────
 const RadialGauge = ({ score, size = 170, grade = "" }) => {
   const numScore = Math.round(score || 0);
@@ -96,17 +110,16 @@ const RadialGauge = ({ score, size = 170, grade = "" }) => {
       {grade && (
         <div style={{ marginTop: 8, textAlign: "center" }}>
           <span style={{
-            fontSize: 14,
+            fontSize: 13,
             fontWeight: 700,
             color,
             background: `${color}18`,
             border: `1px solid ${color}44`,
             borderRadius: 4,
-            padding: "2px 10px",
-            letterSpacing: "0.05em",
-            textTransform: "uppercase"
+            padding: "3px 10px",
+            letterSpacing: "0.03em",
           }}>
-            {grade}
+            {formatGrade(grade)}
           </span>
         </div>
       )}
@@ -213,8 +226,15 @@ const PhoneticWordCard = ({ word, audioURL, refAudioURL }) => {
   };
   const s = statusCfg[word.status] || statusCfg.inconclusive;
 
+  const hasUserAudio = Boolean(
+    audioURL &&
+    word.user_end_sec &&
+    word.user_end_sec > (word.user_start_sec || 0) &&
+    (word.user_end_sec - (word.user_start_sec || 0)) >= 0.05
+  );
+
   const playUserSlice = () => {
-    if (!audioURL || playingUser) return;
+    if (!hasUserAudio || playingUser) return;
     const a = new Audio(audioURL);
     a.currentTime = Math.max(0, word.user_start_sec || 0);
     setPlayingUser(true);
@@ -301,24 +321,27 @@ const PhoneticWordCard = ({ word, audioURL, refAudioURL }) => {
       {/* Audio Playback Buttons */}
       <div style={{ display: "flex", gap: 10, marginBottom: 14 }}>
         <button
-          onClick={playUserSlice}
+          onClick={hasUserAudio ? playUserSlice : undefined}
+          disabled={!hasUserAudio}
+          title={!hasUserAudio ? "This word was not detected in your recitation" : "Play your pronunciation slice"}
           style={{
-            background: playingUser ? "#238636" : "#21262d",
-            color: "#f0f6fc",
+            background: !hasUserAudio ? "#161b22" : (playingUser ? "#238636" : "#21262d"),
+            color: !hasUserAudio ? "#6e7681" : "#f0f6fc",
             border: "1px solid #30363d",
             borderRadius: 6,
             padding: "6px 14px",
             fontSize: 12,
             fontWeight: 600,
-            cursor: "pointer",
+            cursor: !hasUserAudio ? "not-allowed" : "pointer",
+            opacity: !hasUserAudio ? 0.5 : 1,
             display: "flex",
             alignItems: "center",
             gap: 6,
             transition: "all 0.15s ease",
           }}
         >
-          <span>{playingUser ? "■" : "▶"}</span>
-          <span>{playingUser ? "Playing You..." : "Play My Word"}</span>
+          <span>{playingUser ? "■" : (hasUserAudio ? "▶" : "—")}</span>
+          <span>{playingUser ? "Playing You..." : (hasUserAudio ? "Play My Word" : "No Audio")}</span>
         </button>
         <button
           onClick={playRefSlice}
@@ -343,7 +366,10 @@ const PhoneticWordCard = ({ word, audioURL, refAudioURL }) => {
       </div>
 
       {/* Word Match Progress Bar */}
-      <ScoreBar label="Acoustic Match (CMVN + Chroma DTW)" score={word.word_match_score} />
+      <ScoreBar label="Acoustic Articulation (MFCC Timbre Match)" score={word.word_match_score} />
+      <div style={{ fontSize: 11, color: "#8b949e", marginTop: 4, marginBottom: 12 }}>
+        Evaluates vocal tract articulation and phoneme resonance against reference chanting (energy-independent MFCCs).
+      </div>
 
       {/* Phonetic Contrasts Details */}
       {word.contrasts && word.contrasts.length > 0 && (
@@ -396,6 +422,17 @@ const PhoneticWordCard = ({ word, audioURL, refAudioURL }) => {
 };
 
 // ─── Word Svara Card (Accent & Shape) ────────────────────────────────────────
+const formatAccent = (acc) => {
+  if (!acc) return "Neutral";
+  const m = {
+    udatta: "Udātta (High Pitch Accent)",
+    anudatta: "Anudātta (Low Pitch Accent)",
+    svarita: "Svarita (Falling Pitch Accent)",
+    neutral: "Sādhāraṇa (Neutral)",
+  };
+  return m[acc.toLowerCase()] || acc;
+};
+
 const SvaraWordCard = ({ item }) => {
   const ok = item.accent_ok && item.shape_ok;
   return (
@@ -423,8 +460,8 @@ const SvaraWordCard = ({ item }) => {
       {!item.accent_ok && (
         <div style={{ fontSize: 12, color: "#8b949e", marginBottom: 6 }}>
           <span style={{ color: "#ef4444", fontWeight: 600 }}>Accent: </span>
-          Expected <span style={{ color: "#10b981", fontWeight: 600 }}>{item.ref_accent}</span> · Sung{" "}
-          <span style={{ color: "#ef4444", fontWeight: 600 }}>{item.user_accent}</span>
+          Expected <span style={{ color: "#10b981", fontWeight: 600 }}>{formatAccent(item.ref_accent)}</span> · Sung{" "}
+          <span style={{ color: "#ef4444", fontWeight: 600 }}>{formatAccent(item.user_accent)}</span>
           {item.accent_fix && <div style={{ color: "#c9d1d9", marginTop: 3 }}>{item.accent_fix}</div>}
         </div>
       )}
@@ -701,7 +738,7 @@ export default function App() {
             Svara Vaidya · स्वर वैद्य
           </span>
           <span style={{ fontSize: 11, color: "#8b949e", background: "#21262d", padding: "1px 7px", borderRadius: 3 }}>
-            Maha Mrityunjaya Edition
+            Ganesha Shloka Edition
           </span>
         </div>
         <span
@@ -715,7 +752,7 @@ export default function App() {
             border: `1px solid ${apiStatus === "ok" ? "#10b98144" : "#ef444444"}`,
           }}
         >
-          {apiStatus === "ok" ? "● Connected to API" : "● API Offline"}
+           {apiStatus === "ok" ? "● Connected to API" : "● API Offline"} 
         </span>
       </div>
 
@@ -729,7 +766,7 @@ export default function App() {
         }}
       >
         <div style={{ fontSize: 11, color: "#f59e0b", letterSpacing: "0.15em", textTransform: "uppercase", fontWeight: 700, marginBottom: 8 }}>
-          Rigveda 7.59.12 · Mahā Mṛtyuñjaya Mantra
+          Ganesha Shloka (Vakratuṇḍa Mahākāya)
         </div>
         <div
           style={{
@@ -741,10 +778,26 @@ export default function App() {
             marginBottom: 6,
           }}
         >
-          ॐ त्र्यम्बकं यजामहे सुगन्धिं पुष्टिवर्धनम् उर्वारुकमिव बन्धनान् मृत्योर्मुक्षीय मामृतात्
+          वक्रतुण्ड महाकाय सूर्यकोटि समप्रभ निर्विघ्नं कुरुमेदेव सर्वकार्येषु सर्वदा
         </div>
-        <div style={{ fontSize: 13, color: "#8b949e", fontStyle: "italic", marginBottom: 14 }}>
-          oṃ tryambakaṃ yajāmahe sugandhiṃ puṣṭivardhanam urvārukamiva bandhanān mṛtyormukṣīya māmṛtāt
+        <div style={{ fontSize: 13, color: "#8b949e", fontStyle: "italic", marginBottom: 10 }}>
+          vakratuṇḍa mahākāya sūryakoṭi samaprabha nirvighnaṃ kuru me deva sarvakāryeṣu sarvadā
+        </div>
+        <div
+          style={{
+            fontSize: 13,
+            color: "#c9d1d9",
+            maxWidth: 720,
+            margin: "0 auto 16px",
+            lineHeight: 1.6,
+            background: "#161b2299",
+            border: "1px solid #30363d88",
+            borderRadius: 6,
+            padding: "8px 16px",
+          }}
+        >
+          <span style={{ color: "#f59e0b", fontWeight: 600 }}>English Meaning: </span>
+          "O Lord with the curved trunk and immense body, whose brilliance equals ten million suns, please make all my endeavors free from obstacles, always."
         </div>
         <button
           onClick={togglePlayReferenceMantra}
@@ -868,7 +921,7 @@ export default function App() {
 
               {recording && (
                 <div style={{ color: "#ef4444", fontSize: 12, textAlign: "center", marginBottom: 12, fontWeight: 600 }}>
-                  ● Recording in progress... chant the Mahā Mṛtyuñjaya Mantra clearly
+                  ● Recording in progress... chant the Ganesha Shloka clearly
                 </div>
               )}
 
@@ -1054,17 +1107,17 @@ export default function App() {
                   count={phoneticWords.length || 8}
                 />
                 <Tab
-                  label="Ucchāraṇa"
+                  label="Ucchāraṇa (Pronunciation)"
                   active={activeTab === "uccharana"}
                   onClick={() => setActiveTab("uccharana")}
                 />
                 <Tab
-                  label="Svara"
+                  label="Svara (Pitch & Accent)"
                   active={activeTab === "svara"}
                   onClick={() => setActiveTab("svara")}
                 />
                 <Tab
-                  label="Laya & Nāda"
+                  label="Laya & Nāda (Rhythm & Timbre)"
                   active={activeTab === "layanada"}
                   onClick={() => setActiveTab("layanada")}
                 />
@@ -1112,54 +1165,62 @@ export default function App() {
               {/* ── Tab 2: Ucchāraṇa ── */}
               {activeTab === "uccharana" && (
                 <div>
-                  <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12, marginBottom: 20 }}>
-                    {[
-                      ["Character Sim", d.uccharana?.char_sim ?? sc.text_similarity],
-                      ["Word Match", d.uccharana?.word_sim ?? 0],
-                      ["Syllable (Akṣara)", d.uccharana?.syl_sim ?? 0],
-                    ].map(([label, val]) => (
-                      <div
-                        key={label}
-                        style={{
-                          background: "#0d1117",
-                          border: "1px solid #30363d",
-                          borderRadius: 6,
-                          padding: "14px",
-                          textAlign: "center",
-                        }}
-                      >
-                        <div style={{ fontSize: 11, color: "#8b949e", textTransform: "uppercase", marginBottom: 4 }}>
-                          {label}
+                  {!r ? (
+                    <div style={{ color: "#8b949e", textAlign: "center", padding: "40px 0" }}>
+                      Record or upload audio and click "Analyse Chant" to inspect Ucchāraṇa (pronunciation) diagnostics.
+                    </div>
+                  ) : (
+                    <>
+                      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12, marginBottom: 20 }}>
+                        {[
+                          ["Character Sim", d.uccharana?.char_sim ?? sc.text_similarity],
+                          ["Word Match", d.uccharana?.word_sim ?? 0],
+                          ["Syllable (Akṣara)", d.uccharana?.syl_sim ?? 0],
+                        ].map(([label, val]) => (
+                          <div
+                            key={label}
+                            style={{
+                              background: "#0d1117",
+                              border: "1px solid #30363d",
+                              borderRadius: 6,
+                              padding: "14px",
+                              textAlign: "center",
+                            }}
+                          >
+                            <div style={{ fontSize: 11, color: "#8b949e", textTransform: "uppercase", marginBottom: 4 }}>
+                              {label}
+                            </div>
+                            <div style={{ fontSize: 26, fontWeight: 700, color: gradeColor(val || 0), fontFamily: "monospace" }}>
+                              {Math.round(val || 0)}%
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+
+                      {d.uccharana?.issues?.length > 0 && (
+                        <div style={{ marginBottom: 18 }}>
+                          <div style={{ fontSize: 11, fontWeight: 700, color: "#ef4444", textTransform: "uppercase", marginBottom: 8 }}>
+                            Pronunciation Issues
+                          </div>
+                          <FeedbackList items={d.uccharana.issues} variant="error" />
                         </div>
-                        <div style={{ fontSize: 26, fontWeight: 700, color: gradeColor(val || 0), fontFamily: "monospace" }}>
-                          {Math.round(val || 0)}%
+                      )}
+
+                      {d.uccharana?.fixes?.length > 0 && (
+                        <div style={{ marginBottom: 18 }}>
+                          <div style={{ fontSize: 11, fontWeight: 700, color: "#f59e0b", textTransform: "uppercase", marginBottom: 8 }}>
+                            How To Improve
+                          </div>
+                          <FeedbackList items={d.uccharana.fixes} variant="warning" />
                         </div>
-                      </div>
-                    ))}
-                  </div>
+                      )}
 
-                  {d.uccharana?.issues?.length > 0 && (
-                    <div style={{ marginBottom: 18 }}>
-                      <div style={{ fontSize: 11, fontWeight: 700, color: "#ef4444", textTransform: "uppercase", marginBottom: 8 }}>
-                        Pronunciation Issues
-                      </div>
-                      <FeedbackList items={d.uccharana.issues} variant="error" />
-                    </div>
-                  )}
-
-                  {d.uccharana?.fixes?.length > 0 && (
-                    <div style={{ marginBottom: 18 }}>
-                      <div style={{ fontSize: 11, fontWeight: 700, color: "#f59e0b", textTransform: "uppercase", marginBottom: 8 }}>
-                        How To Improve
-                      </div>
-                      <FeedbackList items={d.uccharana.fixes} variant="warning" />
-                    </div>
-                  )}
-
-                  {(!d.uccharana?.issues || d.uccharana.issues.length === 0) && (
-                    <div style={{ color: "#10b981", fontSize: 13, background: "#0d2818", border: "1px solid #10b98144", padding: "14px", borderRadius: 6 }}>
-                      ✓ High ucchāraṇa fidelity — no major phonemic errors detected.
-                    </div>
+                      {(!d.uccharana?.issues || d.uccharana.issues.length === 0) && (
+                        <div style={{ color: "#10b981", fontSize: 13, background: "#0d2818", border: "1px solid #10b98144", padding: "14px", borderRadius: 6 }}>
+                          ✓ High ucchāraṇa fidelity — no major phonemic errors detected.
+                        </div>
+                      )}
+                    </>
                   )}
                 </div>
               )}
@@ -1167,27 +1228,35 @@ export default function App() {
               {/* ── Tab 3: Svara ── */}
               {activeTab === "svara" && (
                 <div>
-                  <div style={{ background: "#0d1117", border: "1px solid #30363d", borderRadius: 6, padding: "16px", marginBottom: 20 }}>
-                    <div style={{ fontSize: 11, fontWeight: 700, color: "#8b949e", textTransform: "uppercase", marginBottom: 12 }}>
-                      Pitch Sub-Score Breakdown
+                  {!r ? (
+                    <div style={{ color: "#8b949e", textAlign: "center", padding: "40px 0" }}>
+                      Record or upload audio and click "Analyse Chant" to inspect Vedic Svara (pitch & accent) diagnostics.
                     </div>
-                    <ScoreBar label="Contour Shape Similarity" score={sc.pitch_breakdown?.contour_shape} />
-                    <ScoreBar label="Pitch Zone Accuracy (Udātta / Anudātta / Svarita)" score={sc.pitch_breakdown?.zone_accuracy} />
-                    <ScoreBar label="Accent Placement" score={sc.pitch_breakdown?.accent_placement} />
-                    <ScoreBar label="Syllable Pitch Shape" score={sc.pitch_breakdown?.syllable_shape} />
-                    <ScoreBar label="Slope / Steepness" score={sc.pitch_breakdown?.slope_steepness} />
-                  </div>
-
-                  <div style={{ fontSize: 12, fontWeight: 700, color: "#8b949e", textTransform: "uppercase", marginBottom: 10 }}>
-                    Word-by-Word Svara Diagnostics ({wordDetail.length} words)
-                  </div>
-
-                  {wordDetail.length > 0 ? (
-                    wordDetail.map((item, idx) => <SvaraWordCard key={idx} item={item} />)
                   ) : (
-                    <div style={{ color: "#10b981", fontSize: 13, background: "#0d2818", border: "1px solid #10b98144", padding: "14px", borderRadius: 6 }}>
-                      ✓ All words carry authentic Vedic svara accents.
-                    </div>
+                    <>
+                      <div style={{ background: "#0d1117", border: "1px solid #30363d", borderRadius: 6, padding: "16px", marginBottom: 20 }}>
+                        <div style={{ fontSize: 11, fontWeight: 700, color: "#8b949e", textTransform: "uppercase", marginBottom: 12 }}>
+                          Pitch Sub-Score Breakdown
+                        </div>
+                        <ScoreBar label="Contour Shape Similarity" score={sc.pitch_breakdown?.contour_shape} />
+                        <ScoreBar label="Pitch Zone Accuracy (Udātta [High] / Anudātta [Low] / Svarita [Falling])" score={sc.pitch_breakdown?.zone_accuracy} />
+                        <ScoreBar label="Accent Placement" score={sc.pitch_breakdown?.accent_placement} />
+                        <ScoreBar label="Syllable Pitch Shape" score={sc.pitch_breakdown?.syllable_shape} />
+                        <ScoreBar label="Slope / Steepness" score={sc.pitch_breakdown?.slope_steepness} />
+                      </div>
+
+                      <div style={{ fontSize: 12, fontWeight: 700, color: "#8b949e", textTransform: "uppercase", marginBottom: 10 }}>
+                        Word-by-Word Svara Diagnostics ({wordDetail.length} words)
+                      </div>
+
+                      {wordDetail.length > 0 ? (
+                        wordDetail.map((item, idx) => <SvaraWordCard key={idx} item={item} />)
+                      ) : (
+                        <div style={{ color: "#10b981", fontSize: 13, background: "#0d2818", border: "1px solid #10b98144", padding: "14px", borderRadius: 6 }}>
+                          ✓ All words carry authentic Vedic svara accents.
+                        </div>
+                      )}
+                    </>
                   )}
                 </div>
               )}
@@ -1195,56 +1264,64 @@ export default function App() {
               {/* ── Tab 4: Laya & Nāda ── */}
               {activeTab === "layanada" && (
                 <div>
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 20 }}>
-                    <div style={{ background: "#0d1117", border: "1px solid #30363d", borderRadius: 6, padding: "16px", textAlign: "center" }}>
-                      <div style={{ fontSize: 11, color: "#8b949e", textTransform: "uppercase", marginBottom: 4 }}>
-                        Laya (Rhythm & Flow)
-                      </div>
-                      <div style={{ fontSize: 32, fontWeight: 700, color: gradeColor(d.laya?.score || 0), fontFamily: "monospace" }}>
-                        {Math.round(d.laya?.score || 0)}%
-                      </div>
+                  {!r ? (
+                    <div style={{ color: "#8b949e", textAlign: "center", padding: "40px 0" }}>
+                      Record or upload audio and click "Analyse Chant" to view Laya & Nāda diagnostics.
                     </div>
+                  ) : (
+                    <>
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 20 }}>
+                        <div style={{ background: "#0d1117", border: "1px solid #30363d", borderRadius: 6, padding: "16px", textAlign: "center" }}>
+                          <div style={{ fontSize: 11, color: "#8b949e", textTransform: "uppercase", marginBottom: 4 }}>
+                            Laya (Rhythm & Flow)
+                          </div>
+                          <div style={{ fontSize: 32, fontWeight: 700, color: gradeColor(d.laya?.score || 0), fontFamily: "monospace" }}>
+                            {Math.round(d.laya?.score || 0)}%
+                          </div>
+                        </div>
 
-                    <div style={{ background: "#0d1117", border: "1px solid #30363d", borderRadius: 6, padding: "16px", textAlign: "center" }}>
-                      <div style={{ fontSize: 11, color: "#8b949e", textTransform: "uppercase", marginBottom: 4 }}>
-                        Duration Pace Ratio
+                        <div style={{ background: "#0d1117", border: "1px solid #30363d", borderRadius: 6, padding: "16px", textAlign: "center" }}>
+                          <div style={{ fontSize: 11, color: "#8b949e", textTransform: "uppercase", marginBottom: 4 }}>
+                            Duration Pace Ratio
+                          </div>
+                          <div style={{ fontSize: 32, fontWeight: 700, color: Math.abs((d.laya?.duration_ratio || 1) - 1) < 0.2 ? "#10b981" : "#f59e0b", fontFamily: "monospace" }}>
+                            {d.laya?.duration_ratio != null ? `${d.laya.duration_ratio}x` : "1.0x"}
+                          </div>
+                          <div style={{ fontSize: 11, color: "#8b949e", marginTop: 2 }}>
+                            {d.laya?.duration_ratio > 1.2 ? "Slow tempo" : d.laya?.duration_ratio < 0.8 ? "Brisk tempo" : "Natural tempo"}
+                          </div>
+                        </div>
                       </div>
-                      <div style={{ fontSize: 32, fontWeight: 700, color: Math.abs((d.laya?.duration_ratio || 1) - 1) < 0.2 ? "#10b981" : "#f59e0b", fontFamily: "monospace" }}>
-                        {d.laya?.duration_ratio != null ? `${d.laya.duration_ratio}x` : "1.0x"}
-                      </div>
-                      <div style={{ fontSize: 11, color: "#8b949e", marginTop: 2 }}>
-                        {d.laya?.duration_ratio > 1.2 ? "Slow tempo" : d.laya?.duration_ratio < 0.8 ? "Brisk tempo" : "Natural tempo"}
-                      </div>
-                    </div>
-                  </div>
 
-                  <div style={{ background: "#0d1117", border: "1px solid #30363d", borderRadius: 6, padding: "16px", marginBottom: 20, textAlign: "center" }}>
-                    <div style={{ fontSize: 11, color: "#8b949e", textTransform: "uppercase", marginBottom: 4 }}>
-                      Nāda (Vocal Timbre & Harmonic Richness)
-                    </div>
-                    <div style={{ fontSize: 36, fontWeight: 700, color: gradeColor(d.nada?.score || 0), fontFamily: "monospace" }}>
-                      {Math.round(d.nada?.score || 0)}%
-                    </div>
-                  </div>
+                      <div style={{ background: "#0d1117", border: "1px solid #30363d", borderRadius: 6, padding: "16px", marginBottom: 20, textAlign: "center" }}>
+                        <div style={{ fontSize: 11, color: "#8b949e", textTransform: "uppercase", marginBottom: 4 }}>
+                          Nāda (Vocal Timbre & Harmonic Richness)
+                        </div>
+                        <div style={{ fontSize: 36, fontWeight: 700, color: gradeColor(d.nada?.score || 0), fontFamily: "monospace" }}>
+                          {Math.round(d.nada?.score || 0)}%
+                        </div>
+                      </div>
 
-                  {r.all_praises && r.all_praises.length > 0 && (
-                    <div style={{ marginBottom: 18 }}>
-                      <div style={{ fontSize: 11, fontWeight: 700, color: "#10b981", textTransform: "uppercase", marginBottom: 8 }}>
-                        Sādhu! (What you chanted well)
-                      </div>
-                      <FeedbackList items={r.all_praises} variant="success" />
-                    </div>
-                  )}
+                      {r?.all_praises && r.all_praises.length > 0 && (
+                        <div style={{ marginBottom: 18 }}>
+                          <div style={{ fontSize: 11, fontWeight: 700, color: "#10b981", textTransform: "uppercase", marginBottom: 8 }}>
+                            Sādhu! (What you chanted well)
+                          </div>
+                          <FeedbackList items={r.all_praises} variant="success" />
+                        </div>
+                      )}
 
-                  {r.sadhana_tip && (
-                    <div style={{ background: "#1c1a14", border: "1px solid #f59e0b55", borderLeft: "4px solid #f59e0b", borderRadius: 6, padding: "14px 18px", marginTop: 18 }}>
-                      <div style={{ fontSize: 11, fontWeight: 700, color: "#f59e0b", textTransform: "uppercase", marginBottom: 4 }}>
-                        🪔 Daily Sādhana Recommendation
-                      </div>
-                      <div style={{ fontSize: 13, color: "#f0f6fc", lineHeight: 1.6 }}>
-                        {r.sadhana_tip}
-                      </div>
-                    </div>
+                      {r?.sadhana_tip && (
+                        <div style={{ background: "#1c1a14", border: "1px solid #f59e0b55", borderLeft: "4px solid #f59e0b", borderRadius: 6, padding: "14px 18px", marginTop: 18 }}>
+                          <div style={{ fontSize: 11, fontWeight: 700, color: "#f59e0b", textTransform: "uppercase", marginBottom: 4 }}>
+                            🪔 Daily Sādhana (Spiritual Practice) Recommendation
+                          </div>
+                          <div style={{ fontSize: 13, color: "#f0f6fc", lineHeight: 1.6 }}>
+                            {r.sadhana_tip}
+                          </div>
+                        </div>
+                      )}
+                    </>
                   )}
                 </div>
               )}

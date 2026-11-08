@@ -28,6 +28,10 @@ import os
 
 import sys
 
+import warnings
+
+warnings.filterwarnings('ignore', module='librosa')
+
 
 
 os.environ.setdefault('HF_HUB_OFFLINE', '1')
@@ -82,6 +86,10 @@ ref_sr        = None
 
 ref_mantra    = None
 
+ref_trim_offset_sec = 0.0
+
+GANESHA_MANTRA_TEXT = "वक्रतुण्ड महाकाय सूर्यकोटि समप्रभ निर्विघ्नं कुरुमेदेव सर्वकार्येषु सर्वदा"
+
 
 
 def _load_references():
@@ -96,7 +104,7 @@ def _load_references():
 
     global MMS_MODEL, MMS_FEATURE_EXTRACTOR, MMS_TOKENIZER, MMS_PROCESSOR, ref_pitch, ref_tempo, ref_mfcc
 
-    global ref_audio, ref_sr, ref_mantra
+    global ref_audio, ref_sr, ref_mantra, ref_trim_offset_sec
 
 
 
@@ -182,7 +190,56 @@ def _load_references():
 
 
 
-    with open(os.path.join(BASE_DIR, "reference_features.json"), "r", encoding="utf-8") as f:
+    ref_audio_raw, ref_sr_raw = librosa.load(os.path.join(BASE_DIR, "mantra.wav"), sr=16000)
+    ref_audio_raw = ref_audio_raw.astype(float)
+    if ref_audio_raw.ndim > 1:
+        ref_audio_raw = ref_audio_raw.mean(axis=1)  # stereo to mono
+
+    ref_audio_trimmed, ref_trim_idx = librosa.effects.trim(ref_audio_raw, top_db=30)
+    ref_trim_offset_sec = float(ref_trim_idx[0]) / 16000.0
+
+    ref_audio = ref_audio_trimmed
+    ref_sr    = 16000
+
+    # Check if reference_features.json needs regeneration for Ganesha Shloka
+    ref_features_path = os.path.join(BASE_DIR, "reference_features.json")
+    need_regen = True
+
+    if os.path.exists(ref_features_path):
+        try:
+            with open(ref_features_path, "r", encoding="utf-8") as f:
+                existing = json.load(f)
+            if existing.get("mantra_text") == GANESHA_MANTRA_TEXT and existing.get("sr") == 16000 and "pitch_contour" in existing:
+                need_regen = False
+        except Exception:
+            need_regen = True
+
+    if need_regen:
+        print("Regenerating reference_features.json for Ganesha Shloka at 16000 Hz from trimmed mantra.wav...")
+        _pitch, _, _ = librosa.pyin(
+            ref_audio, sr=ref_sr,
+            fmin=librosa.note_to_hz('C2'),
+            fmax=librosa.note_to_hz('C7')
+        )
+        _pitch = np.nan_to_num(_pitch)
+        _mfcc  = librosa.feature.mfcc(y=ref_audio, sr=ref_sr, n_mfcc=13)
+        _tempo_arr, _ = librosa.beat.beat_track(y=ref_audio, sr=ref_sr)
+        _tempo = float(_tempo_arr[0]) if isinstance(_tempo_arr, np.ndarray) else float(_tempo_arr)
+
+        ref_data = {
+            "mantra_text": GANESHA_MANTRA_TEXT,
+            "sr": 16000,
+            "pitch_contour": _pitch.tolist(),
+            "mfcc": _mfcc.tolist(),
+            "tempo": _tempo,
+        }
+        with open(ref_features_path, "w", encoding="utf-8") as f:
+            json.dump(ref_data, f, ensure_ascii=False)
+        print("reference_features.json regenerated successfully at 16000 Hz.")
+
+
+
+    with open(ref_features_path, "r", encoding="utf-8") as f:
 
         reference = json.load(f)
 
@@ -195,24 +252,6 @@ def _load_references():
     ref_mfcc   = np.array(reference["mfcc"])
 
     ref_mantra = reference["mantra_text"]
-
-    
-
-    ref_audio_raw, ref_sr_raw = sf.read(os.path.join(BASE_DIR, "mantra.wav"))
-
-    ref_audio_raw = ref_audio_raw.astype(float)
-
-    if ref_audio_raw.ndim > 1:
-
-        ref_audio_raw = ref_audio_raw.mean(axis=1)  # stereo to mono
-
-    ref_audio_trimmed, _      = librosa.effects.trim(ref_audio_raw)
-
-
-
-    ref_audio = ref_audio_trimmed
-
-    ref_sr    = ref_sr_raw
 
 
 
@@ -1385,43 +1424,48 @@ def normalize_sanskrit_phonetic(text):
     """
 
     t = text
-
     t = unicodedata.normalize("NFC", t)
 
+    # MMS-1B Devanagari compound re-joins and phonetic normalizations for Ganesha Shloka
+    # Word 1: vakratunda variants
+    t = re.sub(r'वक्रतु[ण्ं]ड[ं]?', 'वक्रतुण्ड', t)
+    # Word 3: suryakoti variants (सूरिय कोटी, सूरियकोटी, सुर्य कोटी, सूर्य कोटी, etc.)
+    t = re.sub(r'सू[रर्][ि]?य\s*को[टत][ीि]?', 'सूर्यकोटि', t)
+    t = re.sub(r'सु[रर्][ि]?य\s*को[टत][ीि]?', 'सूर्यकोटि', t)
+    t = re.sub(r'सूर्य\s*को[टत][ीि]?', 'सूर्यकोटि', t)
+    # Word 4: samaprabha variants (समब्रभ, समप्रभ)
+    t = re.sub(r'सम[पब][्र]?भ', 'समप्रभ', t)
+    # Word 5: nirvighnam variants (निरविघ्नम, निरवीघ्नम, निर्विघ्न, etc.)
+    t = re.sub(r'नि[रर्]व[िी][घ्ग][नन्मं]+', 'निर्विघ्नं', t)
+    # Word 6: kurumedeva variants (कुरूमे देव, कुरुमे देव, कुरु मे देव, etc.)
+    t = re.sub(r'कु\s*र[ुू]?\s*मे?\s*देव', 'कुरुमेदेव', t)
+    # Word 7: sarvakaryesu variants (सर्व कारियेश, सर्व कार्येश, सर्वकारियेश, etc.)
+    t = re.sub(r'स[रर्]्व?\s*का[रर्][ि]?य[े]?[शष][ुू]?', 'सर्वकार्येषु', t)
+    # Word 8: sarvada variants (सरवदा, सर्वदा)
+    t = re.sub(r'स[रर्]वदा', 'सर्वदा', t)
+
+    # Rejoin common split compounds
+    t = t.replace("कुरु मे देव", "कुरुमेदेव")
+    t = t.replace("कुरु में देव", "कुरुमेदेव")
+    t = t.replace("कुरु मेंदेव", "कुरुमेदेव")
+    t = t.replace("कुरु मेदेव", "कुरुमेदेव")
+
     # Anusvāra ↔ homorganic nasal equivalences
-
     t = t.replace("म्ब", "ंब").replace("म्प", "ंप")
-
     t = t.replace("न्द", "ंद").replace("न्ध", "ंध").replace("न्त", "ंत").replace("न्न", "ंन")
-
     t = t.replace("ण्ड", "ंड").replace("ण्ट", "ंट")
-
-    t = t.replace("ङ्ग", "ंग").replace("ङ्क", "ंक")
+    t = t.replace("ङ्क", "ंक").replace("ङ्ग", "ंग")
+    t = t.replace("ग्न", "घ्न")  # nirvighnam MMS variant
 
     # Sibilant equivalences (ष ↔ श)
-
     t = t.replace("ष", "श")
-
     # Retroflex ↔ dental nasal (ण ↔ न)
-
     t = t.replace("ण", "न")
-
     # Semivowel / labial (ब ↔ व in MMS output)
-
     t = t.replace("ब", "व")
-
-    # Vocalic ṛ variants (रि/रु/ऋ → ऋ)
-
-    t = re.sub(r'(?<!्)रि', 'ऋ', t)
-
-    # Remove halant + virāma if followed by space (schwa deletion artifact)
-
+    # Halant/schwa cleanup
     t = t.replace("्\u200d", "").replace("्\u200c", "")
-
-    # Collapse multiple spaces
-
     t = re.sub(r'\s+', ' ', t).strip()
-
     return t
 
 
@@ -1491,24 +1535,15 @@ def split_syllables(text):
 
 
 def score_to_grade(score):
-
-    """Map 0-100 score to a traditional Sanskrit proficiency label."""
-
-    if score >= 85:
-
-        return "Uttama"          # उत्तम  — Excellent
-
-    elif score >= 70:
-
-        return "Madhyama"        # मध्यम  — Good / Middle
-
-    elif score >= 50:
-
-        return "Ādi"             # आदि    — Beginner / Foundation
-
+    """Map 0-100 score to a traditional Sanskrit proficiency label with English translation in brackets."""
+    if score >= 80:
+        return "Uttama (Excellent)"
+    elif score >= 60:
+        return "Madhyama (Intermediate)"
+    elif score >= 40:
+        return "Ādi (Foundation)"
     else:
-
-        return "Prārambhika"     # प्रारंभिक — Just starting
+        return "Prārambhika (Beginner)"
 
  
 
@@ -2588,6 +2623,106 @@ def generate_full_feedback(
 
     }
 
+def _build_empty_or_silence_response(msg):
+    _ref_json_path = os.path.join(BASE_DIR, "ganesha_shloka.json")
+    try:
+        with open(_ref_json_path, "r", encoding="utf-8") as _rjf:
+            _ref_annot = json.load(_rjf)
+        ref_words_list = _ref_annot.get("words", [])
+    except Exception:
+        ref_words_list = []
+
+    dev_words = [w.get("devanagari", "") for w in ref_words_list] if ref_words_list else [
+        "वक्रतुण्ड", "महाकाय", "सूर्यकोटि", "समप्रभ",
+        "निर्विघ्नं", "कुरुमेदेव", "सर्वकार्येषु", "सर्वदा"
+    ]
+    iast_words = [w.get("iast", "") for w in ref_words_list] if ref_words_list else [
+        "vakratuṇḍa", "mahākāya", "sūryakoṭi", "samaprabha",
+        "nirvighnam", "kuru me deva", "sarvakāryeṣu", "sarvadā"
+    ]
+
+    word_align = [
+        {
+            "index": i,
+            "expected_devanagari": dev_words[i],
+            "expected_iast": iast_words[i],
+            "heard_token": "",
+            "lexical_score": 0.0,
+            "acoustic_score": 0.0,
+            "combined_score": 0.0,
+            "status": "red",
+            "user_start_sec": 0.0,
+            "user_end_sec": 0.0,
+            "ref_start_sec": ref_words_list[i]["start_sec"] if i < len(ref_words_list) else 0.0,
+            "ref_end_sec": ref_words_list[i]["end_sec"] if i < len(ref_words_list) else 0.0,
+        }
+        for i in range(8)
+    ]
+
+    pe_words = [
+        {
+            "index": i,
+            "devanagari": dev_words[i],
+            "iast": iast_words[i],
+            "word_match_score": 0.0,
+            "status": "inconclusive",
+            "user_start_sec": 0.0,
+            "user_end_sec": 0.0,
+            "ref_start_sec": ref_words_list[i]["start_sec"] if i < len(ref_words_list) else 0.0,
+            "ref_end_sec": ref_words_list[i]["end_sec"] if i < len(ref_words_list) else 0.0,
+            "trimmed_user_start_sec": 0.0,
+            "trimmed_user_end_sec": 0.0,
+            "duration_sec": 0.0,
+            "alignment_confidence": 0.0,
+            "contrasts": []
+        }
+        for i in range(8)
+    ]
+
+    return {
+        "overall_score": 0.0,
+        "overall_grade": "Prārambhika (Beginner)",
+        "mantra": ref_mantra or GANESHA_MANTRA_TEXT,
+        "user_transcript": "",
+        "is_valid_mantra": False,
+        "matched_words_count": 0,
+        "gate_message": msg,
+        "word_alignment": word_align,
+        "phonetic_evaluation": {
+            "model_version": "hybrid_heuristic_v1",
+            "summary": {"total_words": 8, "acceptable": 0, "review": 0, "inconclusive": 8, "average_word_score": 0.0},
+            "words": pe_words
+        },
+        "word_timestamps": [],
+        "svara_word_detail": [],
+        "duration_ratio": 0.0,
+        "dimensions": {
+            "uccharana": {"score": 0.0, "char_sim": 0.0, "word_sim": 0.0, "syl_sim": 0.0, "issues": [msg], "fixes": ["Record in a quiet environment and chant the full Ganesha Shloka clearly."], "praises": []},
+            "svara": {"score": 0.0, "issues": ["No pitch contour detected in silence"], "fixes": [], "praises": []},
+            "laya": {"score": 0.0, "duration_ratio": 0.0, "issues": ["No rhythm detected"], "fixes": [], "praises": []},
+            "nada": {"score": 0.0, "issues": ["No vocal timbre detected"], "fixes": [], "praises": []},
+        },
+        "priority_order": ["Uccharana (Pronunciation)", "Svara (Pitch / Accent)", "Laya (Rhythm)", "Nada (Voice Quality)"],
+        "sadhana_tip": "Check your microphone connection and ensure your voice is clearly audible.",
+        "all_praises": [],
+        "scores": {
+            "text_similarity": 0.0,
+            "pitch_combined": 0.0,
+            "tempo_similarity": 0.0,
+            "mfcc_similarity": 0.0,
+            "overall": 0.0,
+            "pitch_breakdown": {
+                "contour_shape": 0.0,
+                "zone_accuracy": 0.0,
+                "accent_placement": 0.0,
+                "syllable_shape": 0.0,
+                "slope_steepness": 0.0,
+            }
+        },
+        "priority": []
+    }
+
+
 # =============================================================================
 
 # 8. ENTRY POINT — called by api.py per request
@@ -2615,25 +2750,31 @@ def analyze_chant(user_audio_path: str) -> dict:
 
 
     # ── Load user chant ──
+    audio_raw, sr = librosa.load(user_audio_path, sr=16000)
 
-    audio, sr = librosa.load(user_audio_path)
+    user_dur = float(len(audio_raw) / sr)
 
-    audio, _  = librosa.effects.trim(audio)
+    # Voice Activity / Silence detection
+    rms = librosa.feature.rms(y=audio_raw, frame_length=1024, hop_length=256)[0]
+    max_rms = float(np.max(rms)) if len(rms) > 0 else 0.0
+    mean_rms = float(np.mean(rms)) if len(rms) > 0 else 0.0
+
+    if user_dur < 1.0 or max_rms < 0.012 or mean_rms < 0.002:
+        return _build_empty_or_silence_response("No audible chanting detected. The recording is silent or too quiet. Please check your microphone.")
+
+    audio, user_trim_idx = librosa.effects.trim(audio_raw, top_db=30)
+
+    user_trim_offset_sec = float(user_trim_idx[0]) / sr
 
 
 
     # ── Pitch ──
-
     pitch, _, _ = librosa.pyin(
-
         audio,
-
+        sr=sr,
         fmin=librosa.note_to_hz('C2'),
-
         fmax=librosa.note_to_hz('C7')
-
     )
-
     pitch = np.nan_to_num(pitch)
 
 
@@ -2800,9 +2941,9 @@ def analyze_chant(user_audio_path: str) -> dict:
 
             ref_audio_path=os.path.join(BASE_DIR, "mantra.wav"),
 
-            annotation_path=os.path.join(BASE_DIR, "ref_maha_mrityunjay.json"),
+            annotation_path=os.path.join(BASE_DIR, "ganesha_shloka.json"),
 
-            precomputed_dtw_wp=wp
+            precomputed_dtw_wp=None
 
         )
 
@@ -2836,9 +2977,9 @@ def analyze_chant(user_audio_path: str) -> dict:
 
             "word": pw.get("devanagari", ""),
 
-            "start": pw.get("user_start_sec", 0.0),
+            "start": pw.get("trimmed_user_start_sec", pw.get("user_start_sec", 0.0)),
 
-            "end": pw.get("user_end_sec", 0.0),
+            "end": pw.get("trimmed_user_end_sec", pw.get("user_end_sec", 0.0)),
 
         })
 
@@ -2907,17 +3048,17 @@ def analyze_chant(user_audio_path: str) -> dict:
 
     canonical_words_dev = [
 
-        "त्र्यम्बकं", "यजामहे", "सुगन्धिं", "पुष्टिवर्धनम्",
+        "वक्रतुण्ड", "महाकाय", "सूर्यकोटि", "समप्रभ",
 
-        "उर्वारुकमिव", "बन्धनान्", "मृत्योर्मुक्षीय", "मामृतात्"
+        "निर्विघ्नं", "कुरुमेदेव", "सर्वकार्येषु", "सर्वदा"
 
     ]
 
     canonical_words_iast = [
 
-        "tryambakam", "yajāmahe", "sugandhim", "puṣṭivardhanam",
+        "vakratuṇḍa", "mahākāya", "sūryakoṭi", "samaprabha",
 
-        "urvārukamiva", "bandhanān", "mṛtyormukṣīya", "māmṛtāt"
+        "nirvighnam", "kuru me deva", "sarvakāryeṣu", "sarvadā"
 
     ]
 
@@ -2934,78 +3075,108 @@ def analyze_chant(user_audio_path: str) -> dict:
 
 
         canon_norm = normalize_sanskrit_phonetic(canonical_words_dev[i])
-
+        canon_no_space = canon_norm.replace(" ", "")
         lexical_score = 0.0
-
         heard_token = ""
 
+        # Candidates include single words, 2-word windows, and 3-word windows
+        candidates = []
         if user_words:
-
-            best_lex = 0.0
-
             for uw in user_words:
+                candidates.append(uw)
+            for j in range(len(user_words) - 1):
+                candidates.append(f"{user_words[j]}{user_words[j+1]}")
+                candidates.append(f"{user_words[j]} {user_words[j+1]}")
+            for j in range(len(user_words) - 2):
+                candidates.append(f"{user_words[j]}{user_words[j+1]}{user_words[j+2]}")
+                candidates.append(f"{user_words[j]} {user_words[j+1]} {user_words[j+2]}")
 
-                uw_norm = normalize_sanskrit_phonetic(uw)
+        best_lex = 0.0
+        for cand in candidates:
+            cand_norm = normalize_sanskrit_phonetic(cand)
+            ls = SequenceMatcher(None, canon_norm, cand_norm).ratio() * 100.0
+            if ls > best_lex:
+                best_lex = ls
+                heard_token = cand
 
-                ls = SequenceMatcher(None, canon_norm, uw_norm).ratio() * 100.0
+        # Also check substring match against normalized user text
+        user_clean_nospace = user_clean.replace(" ", "")
+        if canon_no_space and canon_no_space in user_clean_nospace:
+            best_lex = max(best_lex, 95.0)
+            if not heard_token:
+                heard_token = canonical_words_dev[i]
 
-                if ls > best_lex:
+        lexical_score = best_lex
 
-                    best_lex = ls
-
-                    heard_token = uw
-
-            lexical_score = best_lex
-
-        if not heard_token and i < len(user_words):
-
-            heard_token = user_words[i]
-
-
-
-        combined = 0.60 * lexical_score + 0.40 * acoustic_score
-
-        if combined >= 70:
-
-            status = "green"
-
-        elif combined >= 45:
-
-            status = "white"
-
+        # Balanced combination:
+        # If words were heard in the audio, a word CANNOT be considered matched
+        # if the user recited a completely different word (lexical_score < 20.0).
+        if lexical_score >= 35.0:
+            combined = 0.55 * lexical_score + 0.45 * acoustic_score
+        elif lexical_score >= 20.0:
+            combined = 0.50 * lexical_score + 0.50 * min(acoustic_score, 60.0)
         else:
+            if len(user_words) > 0:
+                # The user recited speech, but said something completely different
+                combined = lexical_score * 0.5
+            else:
+                # No transcript available (whisper/heavy noise): fallback to acoustic only if strong
+                combined = acoustic_score * 0.60 if acoustic_score >= 60.0 else 0.0
 
+        if combined >= 65.0:
+            status = "green"
+        elif combined >= 40.0:
+            status = "white"
+        else:
             status = "red"
 
+        # Cross-mantra protection:
+        # If overall text similarity is low (< 25%), a completely different text/mantra was chanted!
+        # Coincidental vowel/syllable overlap must NOT mark any word as green or white.
+        if text_similarity < 25.0 and lexical_score < 70.0:
+            status = "red"
+            combined = 0.0
 
+        # User playback slice: ALWAYS allow the user to hear what was spoken in this word interval
+        user_dur = len(audio) / sr
+        has_spoken_word = (pe_w.get("user_end_sec", 0.0) > pe_w.get("user_start_sec", 0.0)) and (user_dur > 0.8)
+        u_slice_start = pe_w.get("user_start_sec", 0.0) if has_spoken_word else 0.0
+        u_slice_end   = pe_w.get("user_end_sec", 0.0) if has_spoken_word else 0.0
+        final_heard_token = heard_token if (has_spoken_word and (lexical_score >= 25.0 or acoustic_score >= 35.0)) else ""
+
+        # Synchronize phonetic evaluation status with combined macro status:
+        if i < len(pe_words_list):
+            if status == "green":
+                pe_words_list[i]["status"] = "acceptable"
+            elif status == "white" and pe_words_list[i].get("status") == "inconclusive":
+                pe_words_list[i]["status"] = "review"
+            elif status == "red":
+                pe_words_list[i]["status"] = "inconclusive"
+                pe_words_list[i]["word_match_score"] = min(pe_words_list[i].get("word_match_score", 0.0), combined)
 
         word_alignment.append({
-
             "index": i,
-
             "expected_devanagari": canonical_words_dev[i],
-
             "expected_iast": canonical_words_iast[i],
-
-            "heard_token": heard_token,
-
+            "heard_token": final_heard_token,
             "lexical_score": round(lexical_score, 1),
-
             "acoustic_score": round(acoustic_score, 1),
-
             "combined_score": round(combined, 1),
-
             "status": status,
-
-            "user_start_sec": pe_w.get("user_start_sec", 0.0),
-
-            "user_end_sec": pe_w.get("user_end_sec", 0.0),
-
-            "ref_start_sec": pe_w.get("ref_start_sec", 0.0),
-
-            "ref_end_sec": pe_w.get("ref_end_sec", 0.0),
-
+            "user_start_sec": u_slice_start,
+            "user_end_sec":   u_slice_end,
+            "ref_start_sec":  pe_w.get("ref_start_sec", 0.0),
+            "ref_end_sec":    pe_w.get("ref_end_sec", 0.0),
         })
+
+    # Synchronize phonetic evaluation summary counts
+    if "summary" in phonetic_evaluation_data and pe_words_list:
+        acc_cnt = sum(1 for pw in pe_words_list if pw.get("status") == "acceptable")
+        rev_cnt = sum(1 for pw in pe_words_list if pw.get("status") == "review")
+        inc_cnt = sum(1 for pw in pe_words_list if pw.get("status") == "inconclusive")
+        phonetic_evaluation_data["summary"]["acceptable"] = acc_cnt
+        phonetic_evaluation_data["summary"]["review"] = rev_cnt
+        phonetic_evaluation_data["summary"]["inconclusive"] = inc_cnt
 
 
 
@@ -3029,19 +3200,77 @@ def analyze_chant(user_audio_path: str) -> dict:
 
 
 
-    is_valid_mantra = (matched_count >= 3 or text_similarity >= 20.0) and duration_valid
+    is_valid_mantra = (
+
+        len(user_words) >= 3 and
+
+        matched_count >= 3 and
+
+        text_similarity >= 25.0 and
+
+        duration_valid
+
+    )
+
+
 
     if not is_valid_mantra:
 
-        gate_message = (
+        if len(user_words) == 0:
 
-            f"Recitation does not match the Mahā Mṛtyuñjaya Mantra. "
+            gate_message = "No recognizable Sanskrit chanting detected. Please chant the full Ganesha Shloka clearly."
 
-            f"Only {matched_count}/8 words matched (need ≥ 3). "
+        elif len(user_words) < 3:
 
-            f"Duration ratio: {duration_ratio}x."
+            gate_message = (
 
-        )
+                f"Recitation is too brief ({len(user_words)} word(s) heard: '{user_text}'). "
+
+                f"The full Ganesha Shloka requires all 8 words."
+
+            )
+
+        elif text_similarity < 25.0:
+
+            gate_message = (
+
+                f"Different chant detected. Text similarity with Ganesha Shloka is only {round(text_similarity, 1)}% "
+
+                f"({matched_count}/8 words verified). Heard: '{user_clean}'."
+
+            )
+
+        elif matched_count < 3:
+
+            gate_message = (
+
+                f"Recitation does not match the Ganesha Shloka. "
+
+                f"Only {matched_count}/8 words matched (need ≥ 3). "
+
+                f"Text similarity: {round(text_similarity, 1)}%."
+
+            )
+
+        elif not duration_valid:
+
+            gate_message = (
+
+                f"Chant tempo anomaly: duration ({round(user_duration_sec, 1)}s) is outside expected range "
+
+                f"({duration_ratio}x reference duration)."
+
+            )
+
+        else:
+
+            gate_message = (
+
+                f"Recitation verification failed ({matched_count}/8 words matched, "
+
+                f"text similarity: {round(text_similarity, 1)}%)."
+
+            )
 
     else:
 
@@ -3055,25 +3284,23 @@ def analyze_chant(user_audio_path: str) -> dict:
 
 
 
-    # ── 5. Overall ──
-
-    overall = (
-
+    # ── 5. Overall (Dominant 80% weight to legacy Vedic dimensions, 20% to micro-phonetic evaluation) ──
+    legacy_overall = (
         0.40 * text_similarity  +
-
         0.25 * mfcc_similarity  +
-
         0.20 * pitch_combined   +
-
         0.15 * tempo_similarity
-
     )
 
+    pe_summary = phonetic_evaluation_data.get("summary", {})
+    phonetic_score = float(pe_summary.get("average_word_score", legacy_overall))
 
+    overall = 0.80 * legacy_overall + 0.20 * phonetic_score
 
     if not is_valid_mantra:
-
-        overall = min(overall * 0.25, 18.0)
+        overall = min(overall * 0.15, 10.0)
+        if text_similarity < 15.0:
+            overall = min(overall, 5.0)
 
 
 
@@ -3081,7 +3308,7 @@ def analyze_chant(user_audio_path: str) -> dict:
 
     import json as _json
 
-    _ref_json_path = os.path.join(BASE_DIR, "ref_maha_mrityunjay.json")
+    _ref_json_path = os.path.join(BASE_DIR, "ganesha_shloka.json")
 
     try:
 
@@ -3091,7 +3318,15 @@ def analyze_chant(user_audio_path: str) -> dict:
 
         ref_word_timestamps = [
 
-            {"word": w["devanagari"], "start": w["start_sec"], "end": w["end_sec"]}
+            {
+
+                "word": w["devanagari"],
+
+                "start": max(0.0, w["start_sec"] - ref_trim_offset_sec),
+
+                "end": max(0.0, w["end_sec"] - ref_trim_offset_sec),
+
+            }
 
             for w in _ref_annot.get("words", [])
 
@@ -3141,11 +3376,27 @@ def analyze_chant(user_audio_path: str) -> dict:
 
     feedback_result["phonetic_evaluation"] = phonetic_evaluation_data
 
-    feedback_result["word_timestamps"]   = word_timestamps_data
+    feedback_result["word_timestamps"]   = [
+
+        {
+
+            "word": wt["word"],
+
+            "start": round(wt["start"] + user_trim_offset_sec, 3),
+
+            "end": round(wt["end"] + user_trim_offset_sec, 3)
+
+        }
+
+        for wt in word_timestamps_data
+
+    ]
 
     feedback_result["svara_word_detail"] = word_svara_feedback
 
     feedback_result["is_valid_mantra"]   = is_valid_mantra
+
+    feedback_result["matched_words_count"] = matched_count
 
     feedback_result["gate_message"]      = gate_message
 
