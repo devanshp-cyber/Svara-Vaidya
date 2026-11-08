@@ -127,6 +127,61 @@ const RadialGauge = ({ score, size = 170, grade = "" }) => {
   );
 };
 
+// ─── Shared Audio Player for Word Slices ─────────────────────────────────────
+let globalActiveSliceAudio = null;
+
+const playAudioSpan = (audioUrl, startSec, endSec, onPlayStateChange) => {
+  if (!audioUrl) return;
+  if (globalActiveSliceAudio) {
+    try {
+      globalActiveSliceAudio.pause();
+      if (globalActiveSliceAudio._cleanup) globalActiveSliceAudio._cleanup();
+    } catch (_) {}
+    globalActiveSliceAudio = null;
+  }
+
+  const s = Math.max(0, startSec || 0);
+  const e = (endSec && endSec > s) ? endSec : (s + 1.2);
+
+  const a = new Audio(audioUrl);
+  globalActiveSliceAudio = a;
+
+  let timer = null;
+  const cleanup = () => {
+    if (timer) {
+      clearInterval(timer);
+      timer = null;
+    }
+    if (onPlayStateChange) onPlayStateChange(false);
+    if (globalActiveSliceAudio === a) globalActiveSliceAudio = null;
+  };
+  a._cleanup = cleanup;
+
+  const startPlayback = () => {
+    try {
+      a.currentTime = s;
+      a.play().then(() => {
+        if (onPlayStateChange) onPlayStateChange(true);
+        timer = setInterval(() => {
+          if (a.currentTime >= e || a.ended || a.paused) {
+            a.pause();
+            cleanup();
+          }
+        }, 30);
+      }).catch(() => cleanup());
+    } catch (_) {
+      cleanup();
+    }
+  };
+
+  if (a.readyState >= 1) {
+    startPlayback();
+  } else {
+    a.addEventListener('loadedmetadata', startPlayback, { once: true });
+    a.addEventListener('error', cleanup, { once: true });
+  }
+};
+
 // ─── Interactive Word Pill ───────────────────────────────────────────────────
 const WordPill = ({ word, isSelected, onClick, audioURL }) => {
   const colors = {
@@ -138,17 +193,8 @@ const WordPill = ({ word, isSelected, onClick, audioURL }) => {
 
   const playSlice = (e) => {
     e.stopPropagation();
-    if (!audioURL) return;
-    const a = new Audio(audioURL);
-    a.currentTime = Math.max(0, word.user_start_sec || 0);
-    a.play().catch(() => {});
-    const stopTime = word.user_end_sec || (word.user_start_sec + 1.5);
-    const interval = setInterval(() => {
-      if (a.currentTime >= stopTime || a.ended) {
-        a.pause();
-        clearInterval(interval);
-      }
-    }, 40);
+    if (!audioURL || word.user_start_sec == null) return;
+    playAudioSpan(audioURL, word.user_start_sec, word.user_end_sec);
   };
 
   return (
@@ -235,34 +281,12 @@ const PhoneticWordCard = ({ word, audioURL, refAudioURL }) => {
 
   const playUserSlice = () => {
     if (!hasUserAudio || playingUser) return;
-    const a = new Audio(audioURL);
-    a.currentTime = Math.max(0, word.user_start_sec || 0);
-    setPlayingUser(true);
-    a.play().catch(() => setPlayingUser(false));
-    const stopTime = word.user_end_sec || (word.user_start_sec + 1.5);
-    const interval = setInterval(() => {
-      if (a.currentTime >= stopTime || a.ended) {
-        a.pause();
-        clearInterval(interval);
-        setPlayingUser(false);
-      }
-    }, 40);
+    playAudioSpan(audioURL, word.user_start_sec, word.user_end_sec, setPlayingUser);
   };
 
   const playRefSlice = () => {
     if (!refAudioURL || playingRef) return;
-    const a = new Audio(refAudioURL);
-    a.currentTime = Math.max(0, word.ref_start_sec || 0);
-    setPlayingRef(true);
-    a.play().catch(() => setPlayingRef(false));
-    const stopTime = word.ref_end_sec || (word.ref_start_sec + 1.5);
-    const interval = setInterval(() => {
-      if (a.currentTime >= stopTime || a.ended) {
-        a.pause();
-        clearInterval(interval);
-        setPlayingRef(false);
-      }
-    }, 40);
+    playAudioSpan(refAudioURL, word.ref_start_sec, word.ref_end_sec, setPlayingRef);
   };
 
   return (
@@ -366,10 +390,7 @@ const PhoneticWordCard = ({ word, audioURL, refAudioURL }) => {
       </div>
 
       {/* Word Match Progress Bar */}
-      <ScoreBar label="Acoustic Articulation (MFCC Timbre Match)" score={word.word_match_score} />
-      <div style={{ fontSize: 11, color: "#8b949e", marginTop: 4, marginBottom: 12 }}>
-        Evaluates vocal tract articulation and phoneme resonance against reference chanting (energy-independent MFCCs).
-      </div>
+      <ScoreBar label="Pronunciation Accuracy" score={word.word_match_score} />
 
       {/* Phonetic Contrasts Details */}
       {word.contrasts && word.contrasts.length > 0 && (
@@ -584,6 +605,26 @@ export default function App() {
   const audioChunksRef = useRef([]);
   const fileInputRef = useRef(null);
   const refAudioElementRef = useRef(null);
+  const abortControllerRef = useRef(null);
+
+  const cancelAnalysis = () => {
+    if (abortControllerRef.current) {
+      try { abortControllerRef.current.abort(); } catch (_) {}
+      abortControllerRef.current = null;
+    }
+    setLoading(false);
+  };
+
+  const resetToStartPage = () => {
+    cancelAnalysis();
+    setResult(null);
+    setAudioBlob(null);
+    setAudioURL(null);
+    setError(null);
+    setSelectedWordIdx(null);
+    setActiveTab("phonetic");
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  };
 
   const refAudioURL = `${API_URL}/reference-audio`;
 
@@ -617,7 +658,13 @@ export default function App() {
 
   const startRecording = async () => {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: false,
+          noiseSuppression: false,
+          autoGainControl: false,
+        }
+      });
       mediaStreamRef.current = stream;
 
       const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -665,6 +712,19 @@ export default function App() {
           offset += c.length;
         }
 
+        // Peak-normalize recorded audio to 0.92 maximum amplitude
+        let maxPeak = 0;
+        for (let i = 0; i < merged.length; i++) {
+          const abs = Math.abs(merged[i]);
+          if (abs > maxPeak) maxPeak = abs;
+        }
+        if (maxPeak > 0.01) {
+          const gain = Math.min(0.92 / maxPeak, 6.0);
+          for (let i = 0; i < merged.length; i++) {
+            merged[i] = merged[i] * gain;
+          }
+        }
+
         const wavBlob = encodeWAV(merged, sampleRate);
         setAudioBlob(wavBlob);
         setAudioURL(URL.createObjectURL(wavBlob));
@@ -674,23 +734,71 @@ export default function App() {
     }
   };
 
-  const handleFile = (e) => {
+  const handleFile = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
-    setAudioBlob(file);
-    setAudioURL(URL.createObjectURL(file));
-    setResult(null);
     setError(null);
+    setResult(null);
+
+    try {
+      // Decode ANY audio format (WAV, MP3, MPEG, M4A, OGG, FLAC, WEBM) via Web Audio API
+      const arrayBuffer = await file.arrayBuffer();
+      const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      const decoded = await audioCtx.decodeAudioData(arrayBuffer);
+      audioCtx.close();
+
+      // Convert channels to mono
+      let monoSamples;
+      if (decoded.numberOfChannels === 1) {
+        monoSamples = decoded.getChannelData(0);
+      } else {
+        const left = decoded.getChannelData(0);
+        const right = decoded.getChannelData(1);
+        monoSamples = new Float32Array(left.length);
+        for (let i = 0; i < left.length; i++) {
+          monoSamples[i] = (left[i] + right[i]) / 2.0;
+        }
+      }
+
+      // Check peak for uploaded files - only normalize if quiet (peak < 0.25)
+      let maxPeak = 0;
+      for (let i = 0; i < monoSamples.length; i++) {
+        const abs = Math.abs(monoSamples[i]);
+        if (abs > maxPeak) maxPeak = abs;
+      }
+      if (maxPeak > 0.01 && maxPeak < 0.25) {
+        const gain = Math.min(0.92 / maxPeak, 4.0);
+        for (let i = 0; i < monoSamples.length; i++) {
+          monoSamples[i] = monoSamples[i] * gain;
+        }
+      }
+
+      // Encode into clean 16-bit PCM WAV blob
+      const wavBlob = encodeWAV(monoSamples, decoded.sampleRate);
+      const wavFile = new File([wavBlob], file.name.replace(/\.[^/.]+$/, ".wav"), { type: "audio/wav" });
+      setAudioBlob(wavFile);
+      setAudioURL(URL.createObjectURL(wavBlob));
+    } catch (decodeErr) {
+      console.warn("Client-side audio decode failed, falling back to raw file:", decodeErr);
+      setAudioBlob(file);
+      setAudioURL(URL.createObjectURL(file));
+    }
   };
 
   const analyze = async () => {
     if (!audioBlob) return;
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
     setLoading(true);
     setError(null);
     try {
       const form = new FormData();
       form.append("file", audioBlob, "user_chant.wav");
-      const resp = await fetch(`${API_URL}/analyze`, { method: "POST", body: form });
+      const resp = await fetch(`${API_URL}/analyze`, {
+        method: "POST",
+        body: form,
+        signal: controller.signal
+      });
       if (!resp.ok) {
         const err = await resp.json().catch(() => ({ detail: "Server analysis error" }));
         throw new Error(err.detail || "Analysis failed");
@@ -699,9 +807,14 @@ export default function App() {
       setResult(data);
       setActiveTab("phonetic");
     } catch (e) {
+      if (e.name === "AbortError") {
+        // User cancelled analysis
+        return;
+      }
       setError(e.message);
     } finally {
       setLoading(false);
+      abortControllerRef.current = null;
     }
   };
 
@@ -740,6 +853,29 @@ export default function App() {
           <span style={{ fontSize: 11, color: "#8b949e", background: "#21262d", padding: "1px 7px", borderRadius: 3 }}>
             Ganesha Shloka Edition
           </span>
+          {(result || audioURL) && (
+            <button
+              onClick={resetToStartPage}
+              title="Return to start page and reset recording"
+              style={{
+                fontSize: 11,
+                fontWeight: 600,
+                color: "#c9d1d9",
+                background: "#21262d",
+                border: "1px solid #30363d",
+                padding: "2px 10px",
+                borderRadius: 4,
+                cursor: "pointer",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 5,
+                marginLeft: 4,
+              }}
+            >
+              <span>↺</span>
+              <span>Reset to Start Page</span>
+            </button>
+          )}
         </div>
         <span
           style={{
@@ -848,8 +984,10 @@ export default function App() {
               <div style={{ display: "flex", gap: 10, marginBottom: 16 }}>
                 {!recording ? (
                   <button
-                    onClick={startRecording}
-                    disabled={loading}
+                    onClick={() => {
+                      if (loading) cancelAnalysis();
+                      startRecording();
+                    }}
                     style={{
                       flex: 1,
                       background: "#ef4444",
@@ -859,7 +997,7 @@ export default function App() {
                       padding: "12px 16px",
                       fontSize: 13,
                       fontWeight: 700,
-                      cursor: loading ? "not-allowed" : "pointer",
+                      cursor: "pointer",
                       display: "flex",
                       alignItems: "center",
                       justifyContent: "center",
@@ -894,8 +1032,10 @@ export default function App() {
                 )}
 
                 <button
-                  onClick={() => fileInputRef.current.click()}
-                  disabled={loading}
+                  onClick={() => {
+                    if (loading) cancelAnalysis();
+                    fileInputRef.current.click();
+                  }}
                   style={{
                     flex: 1,
                     background: "#21262d",
@@ -905,18 +1045,23 @@ export default function App() {
                     padding: "12px 16px",
                     fontSize: 13,
                     fontWeight: 600,
-                    cursor: loading ? "not-allowed" : "pointer",
+                    cursor: "pointer",
                   }}
+                  title="Upload audio in WAV, MP3, MPEG, M4A, OGG, FLAC, WEBM formats"
                 >
-                  Upload WAV
+                  Upload Audio (WAV, MP3, MPEG, M4A, OGG, FLAC)
                 </button>
                 <input
                   ref={fileInputRef}
                   type="file"
-                  accept=".wav,.mp3,.m4a,.ogg,.flac"
+                  accept=".wav,.mp3,.mpeg,.mpga,.m4a,.aac,.ogg,.flac,.webm,audio/*"
                   style={{ display: "none" }}
                   onChange={handleFile}
                 />
+              </div>
+
+              <div style={{ color: "#8b949e", fontSize: 11, textAlign: "center", marginBottom: 14 }}>
+                Upload Audio (WAV, MP3, MPEG, M4A, OGG, FLAC) or Record Live
               </div>
 
               {recording && (
@@ -940,34 +1085,79 @@ export default function App() {
               )}
 
               {audioBlob && !loading && !recording && (
-                <button
-                  onClick={analyze}
-                  style={{
-                    width: "100%",
-                    background: "linear-gradient(135deg, #f59e0b 0%, #d97706 100%)",
-                    color: "#0d1117",
-                    border: "none",
-                    borderRadius: 6,
-                    padding: "13px",
-                    fontSize: 14,
-                    fontWeight: 700,
-                    letterSpacing: "0.06em",
-                    textTransform: "uppercase",
-                    cursor: "pointer",
-                  }}
-                >
-                  Analyse Chant
-                </button>
+                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                  <button
+                    onClick={analyze}
+                    style={{
+                      width: "100%",
+                      background: "linear-gradient(135deg, #f59e0b 0%, #d97706 100%)",
+                      color: "#0d1117",
+                      border: "none",
+                      borderRadius: 6,
+                      padding: "13px",
+                      fontSize: 14,
+                      fontWeight: 700,
+                      letterSpacing: "0.06em",
+                      textTransform: "uppercase",
+                      cursor: "pointer",
+                    }}
+                  >
+                    {result ? "Re-Analyse Chant" : "Analyse Chant"}
+                  </button>
+
+                  {result && (
+                    <button
+                      onClick={resetToStartPage}
+                      style={{
+                        width: "100%",
+                        background: "#21262d",
+                        color: "#f0f6fc",
+                        border: "1px solid #30363d",
+                        borderRadius: 6,
+                        padding: "11px",
+                        fontSize: 13,
+                        fontWeight: 600,
+                        cursor: "pointer",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        gap: 8,
+                      }}
+                    >
+                      <span>↺</span>
+                      <span>Start New Recording / Return to Start Page</span>
+                    </button>
+                  )}
+                </div>
               )}
 
               {loading && (
-                <div style={{ textAlign: "center", padding: "16px", background: "#0d1117", borderRadius: 6 }}>
+                <div style={{ textAlign: "center", padding: "16px", background: "#0d1117", borderRadius: 6, border: "1px solid #30363d" }}>
                   <div style={{ color: "#f59e0b", fontSize: 13, fontWeight: 600, marginBottom: 4 }}>
                     Analysing your chant...
                   </div>
-                  <div style={{ color: "#8b949e", fontSize: 11 }}>
+                  <div style={{ color: "#8b949e", fontSize: 11, marginBottom: 12 }}>
                     MMS phonetics + pitch contour + local word DTW (~15-25s)
                   </div>
+                  <button
+                    onClick={cancelAnalysis}
+                    style={{
+                      background: "#21262d",
+                      color: "#f87171",
+                      border: "1px solid #ef444466",
+                      borderRadius: 6,
+                      padding: "7px 16px",
+                      fontSize: 12,
+                      fontWeight: 600,
+                      cursor: "pointer",
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 6,
+                    }}
+                  >
+                    <span>✕</span>
+                    <span>Cancel Analysis & Return</span>
+                  </button>
                 </div>
               )}
 
@@ -1143,6 +1333,27 @@ export default function App() {
                         </span>
                       </div>
                     )}
+                  </div>
+
+                  {/* Single Vedic Pronunciation Explanation Banner */}
+                  <div
+                    style={{
+                      background: "#0d1117",
+                      border: "1px solid #30363d",
+                      borderRadius: 6,
+                      padding: "12px 16px",
+                      marginBottom: 18,
+                      fontSize: 12,
+                      lineHeight: 1.5,
+                      color: "#c9d1d9",
+                    }}
+                  >
+                    <div style={{ fontWeight: 600, color: "#f59e0b", marginBottom: 3 }}>
+                      Vedic Phonetic Articulation & Vowel Prosody (Varṇa & Mātrā)
+                    </div>
+                    <div>
+                      Evaluates vocal resonance, consonant articulation (Sthāna & Prayatna), and short vs. long vowel timing (Hrasva & Dīrgha Mātrā) against the authentic master chanting.
+                    </div>
                   </div>
 
                   {phoneticWords.length > 0 ? (

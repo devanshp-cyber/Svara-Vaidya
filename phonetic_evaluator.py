@@ -21,6 +21,7 @@ import numpy as np
 import librosa
 from sklearn.preprocessing import StandardScaler
 from librosa.sequence import dtw
+from scipy.signal import butter, sosfiltfilt
 
 warnings.filterwarnings('ignore', module='librosa')
 
@@ -52,6 +53,50 @@ CONFIG = {
     "ASPIRATION_ENERGY_RATIO_MIN": 0.05,   # Minimum high-freq breathiness ratio for aspirated stops
     "RETROFLEX_CENTROID_DIFF_HZ": 1500,    # Maximum allowable deviation in spectral centroid
 }
+
+
+def preprocess_for_analysis(y: np.ndarray, sr: int) -> np.ndarray:
+    """
+    Lightweight zero-phase bandpass filter (80 Hz - 4200 Hz) and conditional
+    spectral noise floor reduction if BGM/hum is detected. Clean audio is untouched.
+    """
+    if y is None or len(y) == 0:
+        return y
+
+    # 4th-order zero-phase Butterworth bandpass (80 Hz - 4200 Hz)
+    nyq = 0.5 * sr
+    low = max(20.0, min(80.0, nyq - 100))
+    high = min(4200.0, nyq - 100)
+    if high > low:
+        sos = butter(4, [low / nyq, high / nyq], btype='bandpass', output='sos')
+        y_filt = sosfiltfilt(sos, y)
+    else:
+        y_filt = y.copy()
+
+    rms = librosa.feature.rms(y=y_filt, frame_length=1024, hop_length=256)[0]
+    if len(rms) > 0:
+        p10 = float(np.percentile(rms, 10))
+        p90 = float(np.percentile(rms, 90))
+        # If background noise/music floor is elevated
+        if p90 > 1e-6 and (p10 / p90) > 0.12:
+            n_fft = 1024
+            hop_length = 256
+            stft = librosa.stft(y_filt, n_fft=n_fft, hop_length=hop_length)
+            mag, phase = np.abs(stft), np.angle(stft)
+
+            p20 = np.percentile(rms, 20)
+            noise_mask = (rms <= p20)
+            if np.sum(noise_mask) >= 3:
+                noise_profile = np.mean(mag[:, noise_mask], axis=1, keepdims=True)
+            else:
+                noise_profile = np.percentile(mag, 10, axis=1, keepdims=True)
+
+            mag_clean = np.maximum(mag - 0.9 * noise_profile, 0.05 * mag)
+            stft_clean = mag_clean * np.exp(1j * phase)
+            y_clean = librosa.istft(stft_clean, hop_length=hop_length, length=len(y_filt))
+            return y_clean.astype(y.dtype)
+
+    return y_filt.astype(y.dtype)
 
 
 def project_sub_span(r_sub_start: float, r_sub_end: float, r_word_start: float, r_word_end: float, u_word_start: float, u_word_end: float) -> tuple:
@@ -178,9 +223,13 @@ def align_user_to_reference(
             u_dur_ms = (u_end - u_start) * 1000.0
             if u_dur_ms < CONFIG["MIN_SEGMENT_DURATION_MS"]:
                 confidence = min(confidence, 0.25)
+            u_start_val = round(u_start, 3)
+            u_end_val = round(u_end, 3)
+            u_dur_val = round(u_end - u_start, 3)
         else:
-            u_start = 0.0
-            u_end = 0.0
+            u_start_val = None
+            u_end_val = None
+            u_dur_val = 0.0
             confidence = 0.0
 
         aligned_words.append({
@@ -192,12 +241,66 @@ def align_user_to_reference(
             "ref_start_sec": r_start,
             "ref_end_sec": r_end,
             "ref_duration_sec": r_end - r_start,
-            "user_start_sec": round(u_start, 3),
-            "user_end_sec": round(u_end, 3),
-            "user_duration_sec": round(u_end - u_start, 3),
+            "user_start_sec": u_start_val,
+            "user_end_sec": u_end_val,
+            "user_duration_sec": u_dur_val,
             "alignment_confidence": round(confidence, 2),
             "phonetic_contrasts": w.get("phonetic_contrasts", [])
         })
+
+    # Prevent overlap between adjacent words and resolve continuous transitions
+    for i in range(len(aligned_words) - 1):
+        curr_w = aligned_words[i]
+        next_w = aligned_words[i+1]
+        if (curr_w["user_start_sec"] is not None and curr_w["user_end_sec"] is not None and
+            next_w["user_start_sec"] is not None and next_w["user_end_sec"] is not None):
+            
+            if curr_w["user_end_sec"] < curr_w["user_start_sec"] + 0.05:
+                curr_w["user_end_sec"] = round(curr_w["user_start_sec"] + 0.05, 3)
+
+            curr_r_end = ref_words[i]["end_sec"]
+            next_r_start = ref_words[i+1]["start_sec"]
+            is_continuous = (next_r_start - curr_r_end) < 0.05
+
+            if next_w["user_start_sec"] <= curr_w["user_start_sec"] + 0.05:
+                next_w["user_start_sec"] = round(curr_w["user_end_sec"], 3)
+                if next_w["user_end_sec"] < next_w["user_start_sec"] + 0.05:
+                    next_w["user_end_sec"] = round(next_w["user_start_sec"] + 0.05, 3)
+            elif curr_w["user_end_sec"] > next_w["user_start_sec"]:
+                midpoint = round(0.5 * (curr_w["user_end_sec"] + next_w["user_start_sec"]), 3)
+                midpoint = max(curr_w["user_start_sec"] + 0.05, min(midpoint, next_w["user_end_sec"] - 0.05))
+                curr_w["user_end_sec"] = midpoint
+                next_w["user_start_sec"] = midpoint
+
+            curr_w["user_duration_sec"] = round(max(0.05, curr_w["user_end_sec"] - curr_w["user_start_sec"]), 3)
+            next_w["user_duration_sec"] = round(max(0.05, next_w["user_end_sec"] - next_w["user_start_sec"]), 3)
+
+    # Special pause-valley splitting strictly between Word 7 (sarvakāryeṣu) and Word 8 (sarvadā)
+    # ONLY if Word 8 duration is less than 0.40s
+    if len(aligned_words) >= 8:
+        w7 = aligned_words[6]
+        w8 = aligned_words[7]
+        if (w7["user_start_sec"] is not None and w7["user_end_sec"] is not None and
+            w8["user_start_sec"] is not None and w8["user_end_sec"] is not None and
+            w8["user_duration_sec"] < 0.40):
+            r_end_7 = ref_words[6]["end_sec"]
+            r_start_8 = ref_words[7]["start_sec"]
+            pause_mask = (ref_times_arr >= r_end_7) & (ref_times_arr <= r_start_8)
+            if np.any(pause_mask) and len(user_audio) > 512:
+                u_pause_start = float(np.min(user_times_arr[pause_mask]))
+                u_pause_end = float(np.max(user_times_arr[pause_mask]))
+                if u_pause_end > u_pause_start + 0.05:
+                    rms = librosa.feature.rms(y=user_audio, frame_length=512, hop_length=128)[0]
+                    rms_times = librosa.frames_to_time(np.arange(len(rms)), sr=user_sr, hop_length=128)
+                    in_pause = (rms_times >= u_pause_start) & (rms_times <= u_pause_end)
+                    if np.any(in_pause):
+                        val_idx = np.where(in_pause)[0][np.argmin(rms[in_pause])]
+                        t_valley = float(rms_times[val_idx])
+                        if t_valley > w7["user_start_sec"] + 0.35:
+                            w7["user_end_sec"] = round(t_valley, 3)
+                            w7["user_duration_sec"] = round(w7["user_end_sec"] - w7["user_start_sec"], 3)
+                            w8["user_start_sec"] = round(t_valley, 3)
+                            w8["user_duration_sec"] = round(w8["user_end_sec"] - w8["user_start_sec"], 3)
 
     return aligned_words
 
@@ -480,14 +583,16 @@ def evaluate_phonetics(
     annotations = load_ref_annotations(annotation_path)
     ref_words_raw = annotations.get("words", [])
 
-    # Load and trim both audios at consistent sr=16000
+    # Load, trim on raw audio first for exact sample offset, then bandpass/denoise
     user_audio_raw, user_sr = librosa.load(user_audio_path, sr=16000)
-    user_audio, user_trim_idx = librosa.effects.trim(user_audio_raw, top_db=30)
+    user_audio_trimmed, user_trim_idx = librosa.effects.trim(user_audio_raw, top_db=30)
     user_trim_offset_sec = float(user_trim_idx[0]) / user_sr
+    user_audio = preprocess_for_analysis(user_audio_trimmed, user_sr)
 
     ref_audio_raw, ref_sr = librosa.load(ref_audio_path, sr=16000)
-    ref_audio, ref_trim_idx = librosa.effects.trim(ref_audio_raw, top_db=30)
+    ref_audio_trimmed, ref_trim_idx = librosa.effects.trim(ref_audio_raw, top_db=30)
     ref_trim_offset_sec = float(ref_trim_idx[0]) / ref_sr
+    ref_audio = preprocess_for_analysis(ref_audio_trimmed, ref_sr)
 
     # Shift reference timestamps by ref_trim_offset_sec so they align with trimmed ref_audio
     ref_words = copy.deepcopy(ref_words_raw)
@@ -534,6 +639,31 @@ def evaluate_phonetics(
         r_start = word_info["ref_start_sec"]
         r_end = word_info["ref_end_sec"]
         conf = word_info["alignment_confidence"]
+
+        raw_r_start = round(word_info.get("raw_ref_start_sec", r_start + ref_trim_offset_sec), 3)
+        raw_r_end   = round(word_info.get("raw_ref_end_sec", r_end + ref_trim_offset_sec), 3)
+
+        if u_start is None or u_end is None or u_end <= u_start:
+            word_status = "inconclusive"
+            inconclusive_count += 1
+            match_scores.append(0.0)
+            evaluated_words.append({
+                "index": word_info["index"],
+                "devanagari": word_info["devanagari"],
+                "iast": word_info["iast"],
+                "word_match_score": 0.0,
+                "status": "inconclusive",
+                "user_start_sec": None,
+                "user_end_sec": None,
+                "ref_start_sec": raw_r_start,
+                "ref_end_sec": raw_r_end,
+                "trimmed_user_start_sec": None,
+                "trimmed_user_end_sec": None,
+                "duration_sec": 0.0,
+                "alignment_confidence": 0.0,
+                "contrasts": []
+            })
+            continue
 
         # Word acoustic match score
         match_score = compute_local_word_match(

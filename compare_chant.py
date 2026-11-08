@@ -18,7 +18,7 @@ import re
 
 from scipy.ndimage import uniform_filter1d         # Smooth pitch curve
 
-from scipy.signal import find_peaks, resample      # Peak detection, resamp
+from scipy.signal import find_peaks, resample, butter, sosfiltfilt      # Peak detection, resamp, filtering
 
 import torch
 
@@ -90,6 +90,50 @@ ref_trim_offset_sec = 0.0
 
 GANESHA_MANTRA_TEXT = "वक्रतुण्ड महाकाय सूर्यकोटि समप्रभ निर्विघ्नं कुरुमेदेव सर्वकार्येषु सर्वदा"
 
+
+
+def preprocess_for_analysis(y: np.ndarray, sr: int) -> np.ndarray:
+    """
+    Lightweight zero-phase bandpass filter (80 Hz - 4200 Hz) and conditional
+    spectral noise floor reduction if BGM/hum is detected. Clean audio is untouched.
+    """
+    if y is None or len(y) == 0:
+        return y
+
+    # 4th-order zero-phase Butterworth bandpass (80 Hz - 4200 Hz)
+    nyq = 0.5 * sr
+    low = max(20.0, min(80.0, nyq - 100))
+    high = min(4200.0, nyq - 100)
+    if high > low:
+        sos = butter(4, [low / nyq, high / nyq], btype='bandpass', output='sos')
+        y_filt = sosfiltfilt(sos, y)
+    else:
+        y_filt = y.copy()
+
+    rms = librosa.feature.rms(y=y_filt, frame_length=1024, hop_length=256)[0]
+    if len(rms) > 0:
+        p10 = float(np.percentile(rms, 10))
+        p90 = float(np.percentile(rms, 90))
+        # If noise floor is elevated (typical of BGM / tanpura / hum)
+        if p90 > 1e-6 and (p10 / p90) > 0.12:
+            n_fft = 1024
+            hop_length = 256
+            stft = librosa.stft(y_filt, n_fft=n_fft, hop_length=hop_length)
+            mag, phase = np.abs(stft), np.angle(stft)
+
+            p20 = np.percentile(rms, 20)
+            noise_mask = (rms <= p20)
+            if np.sum(noise_mask) >= 3:
+                noise_profile = np.mean(mag[:, noise_mask], axis=1, keepdims=True)
+            else:
+                noise_profile = np.percentile(mag, 10, axis=1, keepdims=True)
+
+            mag_clean = np.maximum(mag - 0.9 * noise_profile, 0.05 * mag)
+            stft_clean = mag_clean * np.exp(1j * phase)
+            y_clean = librosa.istft(stft_clean, hop_length=hop_length, length=len(y_filt))
+            return y_clean.astype(y.dtype)
+
+    return y_filt.astype(y.dtype)
 
 
 def _load_references():
@@ -1010,25 +1054,18 @@ def pitch_slope_similarity(ref_p, user_p):
  
 
     ref_slopes  = get_slopes(ref_p)
-
     user_slopes = get_slopes(user_p)
 
- 
-
     if len(ref_slopes) == 0 or len(user_slopes) == 0:
-
         return 0.0
 
- 
+    slope_ratio = len(user_slopes) / max(len(ref_slopes), 1)
+    scaled_user_slopes = user_slopes * slope_ratio
 
     D, wp = dtw(
-
         ref_slopes.reshape(1, -1),
-
-        user_slopes.reshape(1, -1),
-
+        scaled_user_slopes.reshape(1, -1),
         metric='euclidean'
-
     )
 
     slope_dist = D[-1, -1] / len(wp)
@@ -1426,29 +1463,32 @@ def normalize_sanskrit_phonetic(text):
     t = text
     t = unicodedata.normalize("NFC", t)
 
-    # MMS-1B Devanagari compound re-joins and phonetic normalizations for Ganesha Shloka
-    # Word 1: vakratunda variants
-    t = re.sub(r'वक्रतु[ण्ं]ड[ं]?', 'वक्रतुण्ड', t)
-    # Word 3: suryakoti variants (सूरिय कोटी, सूरियकोटी, सुर्य कोटी, सूर्य कोटी, etc.)
+    # Collapse only the known compound splits while keeping spaces between the 8 words
+    t = re.sub(r'वक्र\s*तु[ण्ं]ड[ं]?', 'वक्रतुण्ड', t)
+    t = re.sub(r'महा\s*काय[ा]?', 'महाकाय', t)
     t = re.sub(r'सू[रर्][ि]?य\s*को[टत][ीि]?', 'सूर्यकोटि', t)
     t = re.sub(r'सु[रर्][ि]?य\s*को[टत][ीि]?', 'सूर्यकोटि', t)
     t = re.sub(r'सूर्य\s*को[टत][ीि]?', 'सूर्यकोटि', t)
-    # Word 4: samaprabha variants (समब्रभ, समप्रभ)
-    t = re.sub(r'सम[पब][्र]?भ', 'समप्रभ', t)
-    # Word 5: nirvighnam variants (निरविघ्नम, निरवीघ्नम, निर्विघ्न, etc.)
-    t = re.sub(r'नि[रर्]व[िी][घ्ग][नन्मं]+', 'निर्विघ्नं', t)
-    # Word 6: kurumedeva variants (कुरूमे देव, कुरुमे देव, कुरु मे देव, etc.)
-    t = re.sub(r'कु\s*र[ुू]?\s*मे?\s*देव', 'कुरुमेदेव', t)
-    # Word 7: sarvakaryesu variants (सर्व कारियेश, सर्व कार्येश, सर्वकारियेश, etc.)
+    t = re.sub(r'सम\s*[पबफ़][्र]?भ[ा]?', 'समप्रभ', t)
+    t = re.sub(r'न[िी]?र[्]?\s*[वब][िीे]?[घ्गख][्]?(?:[नन्मं]+|[लत][ा]?)?', 'निर्विघ्नं', t)
+    t = re.sub(r'कोरो\s*मे?\s*[तद]े?\s*व', 'कुरुमेदेव', t)
+    t = re.sub(r'कु\s*र[ुू]?\s*मे?\s*[तद]े?\s*व', 'कुरुमेदेव', t)
     t = re.sub(r'स[रर्]्व?\s*का[रर्][ि]?य[े]?[शष][ुू]?', 'सर्वकार्येषु', t)
-    # Word 8: sarvada variants (सरवदा, सर्वदा)
-    t = re.sub(r'स[रर्]वदा', 'सर्वदा', t)
+    t = re.sub(r'स[रर्]व[दन][ा]?', 'सर्वदा', t)
 
-    # Rejoin common split compounds
+    # Rejoin explicit known compound splits
     t = t.replace("कुरु मे देव", "कुरुमेदेव")
     t = t.replace("कुरु में देव", "कुरुमेदेव")
     t = t.replace("कुरु मेंदेव", "कुरुमेदेव")
     t = t.replace("कुरु मेदेव", "कुरुमेदेव")
+    t = t.replace("सूर्य कोटि", "सूर्यकोटि")
+    t = t.replace("सूर्य कोटी", "सूर्यकोटि")
+    t = t.replace("सर्व कार्येषु", "सर्वकार्येषु")
+    t = t.replace("सर्व कार्येश", "सर्वकार्येषु")
+    t = t.replace("महा काय", "महाकाय")
+    t = t.replace("सम प्रभ", "समप्रभ")
+    t = t.replace("वक्र तुण्ड", "वक्रतुण्ड")
+    t = t.replace("वक्र तुंड", "वक्रतुण्ड")
 
     # Anusvāra ↔ homorganic nasal equivalences
     t = t.replace("म्ब", "ंब").replace("म्प", "ंप")
@@ -1944,25 +1984,18 @@ def rhythm_feedback(tempo_similarity, ref_audio, audio, sr):
  
 
     if tempo_similarity < 50:
-
-        if duration_ratio > 1.3:
-
+        if duration_ratio > 3.2:
             issues.append(
-
-                f"Laya is too slow — your chant is {round(duration_ratio, 1)}× longer than the reference. "
-
-                "In Vedic recitation, dragging the laya dilutes the mantra's śakti (power)"
-
+                f"Laya is excessively prolonged ({round(duration_ratio, 1)}× longer than reference). "
+                "In Vedic recitation, dragging the laya excessively dilutes the mantra's śakti."
             )
-
             fixes.append(
-
-                "Use a tāla (rhythmic clap) or metronome set to the reference tempo — "
-
-                "chant with the tāla until the laya is internalized (at least 21 repetitions)"
-
+                "Aim for a steady cadence — practice keeping full recitation between 10s and 30s."
             )
-
+        elif duration_ratio > 1.35:
+            praises.append(
+                f"Vilambita laya: Meditative, serene pacing ({round(duration_ratio, 1)}× reference duration)."
+            )
         elif duration_ratio < 0.7:
 
             issues.append(
@@ -2762,11 +2795,130 @@ def analyze_chant(user_audio_path: str) -> dict:
     if user_dur < 1.0 or max_rms < 0.012 or mean_rms < 0.002:
         return _build_empty_or_silence_response("No audible chanting detected. The recording is silent or too quiet. Please check your microphone.")
 
-    audio, user_trim_idx = librosa.effects.trim(audio_raw, top_db=30)
-
+    audio_trimmed, user_trim_idx = librosa.effects.trim(audio_raw, top_db=30)
     user_trim_offset_sec = float(user_trim_idx[0]) / sr
+    audio = preprocess_for_analysis(audio_trimmed, sr)
 
+    # ── CTC Word Segmentation & Active Analysis Window ──
+    audio_16k = audio
+    inputs = MMS_FEATURE_EXTRACTOR(audio_16k, sampling_rate=16000, return_tensors="pt")
+    with torch.no_grad():
+        logits = MMS_MODEL(**inputs).logits
+    predicted_ids = torch.argmax(logits, dim=-1)
+    user_text = MMS_TOKENIZER.decode(predicted_ids[0].tolist(), skip_special_tokens=True).strip().lower()
+    print(f"MMS transcript: {user_text}")
 
+    num_frames = logits.shape[1]
+    sec_per_frame = (len(audio_16k) / 16000.0) / max(1, num_frames)
+
+    pred_list = predicted_ids[0].tolist()
+    collapsed = []
+    for t, pid in enumerate(pred_list):
+        if pid != 0:
+            if len(collapsed) == 0 or collapsed[-1]['id'] != pid or (t - collapsed[-1]['end_frame'] > 1):
+                collapsed.append({'id': pid, 'start_frame': t, 'end_frame': t})
+            else:
+                collapsed[-1]['end_frame'] = t
+
+    ctc_words = []
+    curr_tokens = []
+    curr_start = None
+    curr_end = None
+    for item in collapsed:
+        pid = item['id']
+        if pid == 4:
+            if curr_tokens:
+                text = MMS_TOKENIZER.decode(curr_tokens, skip_special_tokens=True).strip()
+                n = normalize_sanskrit_phonetic(clean_text(text)).replace(" ", "")
+                if n:
+                    ctc_words.append({'text': text, 'norm': n, 'start_sec': curr_start * sec_per_frame, 'end_sec': (curr_end + 1) * sec_per_frame})
+                curr_tokens = []
+                curr_start = None
+        else:
+            if curr_start is None:
+                curr_start = item['start_frame']
+            curr_end = item['end_frame']
+            curr_tokens.append(pid)
+    if curr_tokens:
+        text = MMS_TOKENIZER.decode(curr_tokens, skip_special_tokens=True).strip()
+        n = normalize_sanskrit_phonetic(clean_text(text)).replace(" ", "")
+        if n:
+            ctc_words.append({'text': text, 'norm': n, 'start_sec': curr_start * sec_per_frame, 'end_sec': (curr_end + 1) * sec_per_frame})
+
+    spans = []
+    for i in range(len(ctc_words)):
+        for w_len in (1, 2, 3):
+            if i + w_len <= len(ctc_words):
+                group = ctc_words[i:i+w_len]
+                comb_norm = "".join(g['norm'] for g in group)
+                comb_text = " ".join(g['text'] for g in group)
+                spans.append({
+                    'text': comb_text,
+                    'norm': comb_norm,
+                    'start_sec': group[0]['start_sec'],
+                    'end_sec': group[-1]['end_sec'],
+                    'start_idx': i,
+                    'end_idx': i + w_len
+                })
+
+    canonical_words_dev = [
+        "वक्रतुण्ड", "महाकाय", "सूर्यकोटि", "समप्रभ",
+        "निर्विघ्नं", "कुरुमेदेव", "सर्वकार्येषु", "सर्वदा"
+    ]
+    canonical_words_iast = [
+        "vakratuṇḍa", "mahākāya", "sūryakoṭi", "samaprabha",
+        "nirvighnam", "kuru me deva", "sarvakāryeṣu", "sarvadā"
+    ]
+
+    matched_ctc_by_canon = {}
+    last_matched_start_idx = -1
+    last_matched_start_sec = 0.0
+    for c_idx, cw in enumerate(canonical_words_dev):
+        c_norm = normalize_sanskrit_phonetic(clean_text(cw)).replace(" ", "")
+        best_score = 0.0
+        best_span = None
+        for sp in spans:
+            # Strictly preserve monotonic word sequence: later words cannot start before previous words
+            if sp['start_idx'] <= last_matched_start_idx:
+                continue
+            if sp['start_sec'] < last_matched_start_sec - 0.05:
+                continue
+            score = SequenceMatcher(None, c_norm, sp['norm']).ratio() * 100.0
+            if (sp['norm'] in c_norm or c_norm in sp['norm']) and len(sp['norm']) >= 3 and (len(sp['norm']) / max(1, len(c_norm))) >= 0.35:
+                score = max(score, 75.0)
+            if score > best_score:
+                best_score = score
+                best_span = sp
+        if best_score >= 45.0:
+            matched_ctc_by_canon[c_idx] = {'span': best_span, 'score': best_score}
+            last_matched_start_idx = best_span['start_idx']
+            last_matched_start_sec = best_span['start_sec']
+
+    active_crop_offset_sec = 0.0
+    active_dur = len(audio) / sr
+    if matched_ctc_by_canon:
+        min_canon_idx = min(matched_ctc_by_canon.keys())
+        max_canon_idx = max(matched_ctc_by_canon.keys())
+        first_span = matched_ctc_by_canon[min_canon_idx]['span']
+        last_span = matched_ctc_by_canon[max_canon_idx]['span']
+
+        should_crop_start = (first_span['start_sec'] > 1.2 and first_span['start_idx'] > 0)
+        should_crop_end = ((active_dur - last_span['end_sec']) > 1.2 and last_span['end_idx'] < len(ctc_words))
+        if should_crop_start or should_crop_end:
+            crop_start = max(0.0, first_span['start_sec'] - 0.20) if should_crop_start else 0.0
+            crop_end = min(active_dur, last_span['end_sec'] + 0.25) if should_crop_end else active_dur
+            if (crop_end - crop_start) >= 2.0:
+                print(f"Cropping extra speech: active window [{crop_start:.2f}s, {crop_end:.2f}s] of {active_dur:.2f}s")
+                audio = audio[int(crop_start * sr):int(crop_end * sr)]
+                active_crop_offset_sec = crop_start
+                try:
+                    cropped_inputs = MMS_FEATURE_EXTRACTOR(audio, sampling_rate=16000, return_tensors="pt")
+                    with torch.no_grad():
+                        cropped_logits = MMS_MODEL(**cropped_inputs).logits
+                    cropped_pids = torch.argmax(cropped_logits, dim=-1)
+                    user_text = MMS_TOKENIZER.decode(cropped_pids[0].tolist(), skip_special_tokens=True).strip().lower()
+                except Exception:
+                    pass
 
     # ── Pitch ──
     pitch, _, _ = librosa.pyin(
@@ -2777,21 +2929,15 @@ def analyze_chant(user_audio_path: str) -> dict:
     )
     pitch = np.nan_to_num(pitch)
 
-
-
     # ── Tempo ──
 
     tempo_arr, _ = librosa.beat.beat_track(y=audio, sr=sr)
 
     tempo = float(tempo_arr[0]) if isinstance(tempo_arr, np.ndarray) else float(tempo_arr)
 
-
-
     # ── MFCC ──
 
     mfcc = librosa.feature.mfcc(y=audio, sr=sr, n_mfcc=13)
-
-
 
     # ── 1. Pitch similarity ──
 
@@ -2823,8 +2969,6 @@ def analyze_chant(user_audio_path: str) -> dict:
 
         pitch_similarity = 100 * np.exp(-dtw_distance / 5)
 
-
-
     # ── 1-a Zone analysis ──
 
     ref_zones,  ref_norm  = extract_pitch_zones(ref_pitch)
@@ -2833,26 +2977,27 @@ def analyze_chant(user_audio_path: str) -> dict:
 
     zone_sim, zone_feedback = compare_pitch_zones(ref_zones, user_zones)
 
-
-
-    # ── 1-b Accent classifier ──
+    # ── 1-b Accent classifier (speaker-relative thresholds & length-normalized comparison) ──
 
     ref_voiced     = ref_pitch[ref_pitch > 0]
 
-    ref_low_thresh  = np.percentile(ref_voiced, 33)
+    ref_low_thresh  = np.percentile(ref_voiced, 33) if len(ref_voiced) > 0 else 0
 
-    ref_high_thresh = np.percentile(ref_voiced, 66)
+    ref_high_thresh = np.percentile(ref_voiced, 66) if len(ref_voiced) > 0 else 0
 
     ref_accent_levels  = classify_accent_levels(ref_pitch, ref_low_thresh, ref_high_thresh)
 
-    user_accent_levels = classify_accent_levels(pitch,     ref_low_thresh, ref_high_thresh)
+    user_accent_levels = classify_accent_levels(pitch, low_thresh=None, high_thresh=None)
 
-    if len(ref_accent_levels) > 0 and len(user_accent_levels) > 0:
-
-        accent_sim = SequenceMatcher(None, ref_accent_levels.tolist(), user_accent_levels.tolist()).ratio() * 100
-
+    ref_voiced_acc = ref_accent_levels[ref_accent_levels > 0]
+    user_voiced_acc = user_accent_levels[user_accent_levels > 0]
+    if len(ref_voiced_acc) > 0 and len(user_voiced_acc) > 0:
+        idx_ref = np.linspace(0, len(ref_voiced_acc) - 1, 100).round().astype(int)
+        idx_user = np.linspace(0, len(user_voiced_acc) - 1, 100).round().astype(int)
+        ref_resampled = ref_voiced_acc[idx_ref]
+        user_resampled = user_voiced_acc[idx_user]
+        accent_sim = SequenceMatcher(None, ref_resampled.tolist(), user_resampled.tolist()).ratio() * 100.0
     else:
-
         accent_sim = 0.0
 
 
@@ -2928,151 +3073,149 @@ def analyze_chant(user_audio_path: str) -> dict:
 
 
     # Local Word & Phonetic Evaluation
-
     phonetic_evaluation_data = {}
-
+    tmp_active_path = None
     try:
-
         import phonetic_evaluator as pe
+        import tempfile
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp_act:
+            sf.write(tmp_act.name, audio, sr)
+            tmp_active_path = tmp_act.name
 
         phonetic_res = pe.evaluate_phonetics(
-
-            user_audio_path=user_audio_path,
-
+            user_audio_path=tmp_active_path,
             ref_audio_path=os.path.join(BASE_DIR, "mantra.wav"),
-
             annotation_path=os.path.join(BASE_DIR, "ganesha_shloka.json"),
-
             precomputed_dtw_wp=None
-
         )
-
         phonetic_evaluation_data = phonetic_res.get("phonetic_evaluation", {})
-
     except Exception as pe_err:
-
         print(f"Phonetic evaluation notice: {pe_err}")
-
         phonetic_evaluation_data = {
-
             "error": str(pe_err),
-
             "summary": {"total_words": 0, "acceptable": 0, "review": 0, "inconclusive": 0},
-
             "words": []
-
         }
+    finally:
+        if tmp_active_path and os.path.exists(tmp_active_path):
+            try:
+                os.unlink(tmp_active_path)
+            except Exception:
+                pass
 
+    # Total offset of audio passed to pe relative to raw audio
+    total_raw_offset_sec = round(user_trim_offset_sec + active_crop_offset_sec, 3)
 
+    # Adjust word timestamps for total raw audio offset (trim + active crop)
+    pe_words_list = phonetic_evaluation_data.get("words", [])
+    if total_raw_offset_sec > 0.0:
+        for pw in pe_words_list:
+            if pw.get("user_start_sec") is not None:
+                pw["user_start_sec"] = round(pw["user_start_sec"] + total_raw_offset_sec, 3)
+                pw["user_end_sec"] = round(pw["user_end_sec"] + total_raw_offset_sec, 3)
+            if pw.get("trimmed_user_start_sec") is not None:
+                pw["trimmed_user_start_sec"] = round(pw["trimmed_user_start_sec"] + total_raw_offset_sec, 3)
+                pw["trimmed_user_end_sec"] = round(pw["trimmed_user_end_sec"] + total_raw_offset_sec, 3)
+
+    # Refine word boundaries using high-precision CTC character anchors
+    # CTC character tokens pin the physical vocalization onset of each word
+    if matched_ctc_by_canon:
+        for i, pw in enumerate(pe_words_list):
+            if i in matched_ctc_by_canon:
+                ctc_span = matched_ctc_by_canon[i]['span']
+                ctc_raw_s = round(ctc_span['start_sec'] + user_trim_offset_sec, 3)
+                ctc_raw_e = round(ctc_span['end_sec'] + user_trim_offset_sec, 3)
+
+                curr_s = pw.get("user_start_sec")
+                curr_e = pw.get("user_end_sec")
+
+                if curr_s is None or curr_e is None or abs(curr_s - ctc_raw_s) > 1.2:
+                    pw["user_start_sec"] = ctc_raw_s
+                    pw["user_end_sec"] = max(ctc_raw_e, round(ctc_raw_s + 0.1, 3))
+                    pw["duration_sec"] = round(pw["user_end_sec"] - pw["user_start_sec"], 3)
+                    try:
+                        ac = pe.compute_local_word_match(
+                            audio_raw, sr, ref_audio, ref_sr,
+                            pw["user_start_sec"], pw["user_end_sec"],
+                            pw.get("ref_start_sec", 0.0), pw.get("ref_end_sec", 1.0)
+                        )
+                        pw["word_match_score"] = round(max(pw.get("word_match_score", 0.0), ac), 1)
+                    except Exception:
+                        pass
+                else:
+                    # Prevent word start from bleeding backward into the previous word
+                    pw["user_start_sec"] = max(curr_s, round(ctc_raw_s - 0.04, 3))
+                    pw["user_end_sec"] = max(curr_e, round(ctc_raw_e, 3))
+                    pw["duration_sec"] = round(pw["user_end_sec"] - pw["user_start_sec"], 3)
+
+                # Clamp previous spoken word end so it never extends past current word's onset
+                if i > 0:
+                    prev_pw = pe_words_list[i-1]
+                    if prev_pw.get("user_end_sec") is not None and prev_pw["user_end_sec"] > ctc_raw_s - 0.02:
+                        prev_pw["user_end_sec"] = round(ctc_raw_s - 0.02, 3)
+                        if prev_pw.get("user_start_sec") is not None:
+                            prev_pw["duration_sec"] = round(max(0.05, prev_pw["user_end_sec"] - prev_pw["user_start_sec"]), 3)
+
+    # Strictly guarantee non-overlapping sequential boundaries across all words
+    for i in range(len(pe_words_list) - 1):
+        curr_pw = pe_words_list[i]
+        next_pw = pe_words_list[i+1]
+        if (curr_pw.get("user_start_sec") is not None and curr_pw.get("user_end_sec") is not None and
+            next_pw.get("user_start_sec") is not None and next_pw.get("user_end_sec") is not None):
+            if curr_pw["user_end_sec"] < curr_pw["user_start_sec"] + 0.05:
+                curr_pw["user_end_sec"] = round(curr_pw["user_start_sec"] + 0.05, 3)
+
+            if next_pw["user_start_sec"] <= curr_pw["user_start_sec"] + 0.05:
+                # Inverted or cramped start: push next word start to after current word
+                next_pw["user_start_sec"] = curr_pw["user_end_sec"]
+                if next_pw["user_end_sec"] < next_pw["user_start_sec"] + 0.05:
+                    next_pw["user_end_sec"] = round(next_pw["user_start_sec"] + 0.05, 3)
+            elif curr_pw["user_end_sec"] > next_pw["user_start_sec"]:
+                curr_pw["user_end_sec"] = next_pw["user_start_sec"]
+
+            curr_pw["duration_sec"] = round(max(0.05, curr_pw["user_end_sec"] - curr_pw["user_start_sec"]), 3)
+            next_pw["duration_sec"] = round(max(0.05, next_pw["user_end_sec"] - next_pw["user_start_sec"]), 3)
 
     # Populate word timestamps from phonetic evaluation
-
     word_timestamps_data = []
-
-    pe_words_list = phonetic_evaluation_data.get("words", [])
-
     for pw in pe_words_list:
-
-        word_timestamps_data.append({
-
-            "word": pw.get("devanagari", ""),
-
-            "start": pw.get("trimmed_user_start_sec", pw.get("user_start_sec", 0.0)),
-
-            "end": pw.get("trimmed_user_end_sec", pw.get("user_end_sec", 0.0)),
-
-        })
-
-
+        if pw.get("user_start_sec") is not None and pw.get("user_end_sec") is not None:
+            word_timestamps_data.append({
+                "word": pw.get("devanagari", ""),
+                "start": pw.get("user_start_sec", 0.0),
+                "end": pw.get("user_end_sec", 0.0),
+            })
 
     # ── 4. Text / Whisper ──
-
-    try:
-
-        audio_16k = librosa.resample(audio, orig_sr=sr, target_sr=16000)
-
-        inputs = MMS_FEATURE_EXTRACTOR(
-
-            audio_16k, sampling_rate=16000, return_tensors="pt"
-
-        )
-
-        with torch.no_grad():
-
-            logits = MMS_MODEL(**inputs).logits
-
-        predicted_ids = torch.argmax(logits, dim=-1)
-
-        user_text = MMS_TOKENIZER.decode(predicted_ids[0].tolist(), skip_special_tokens=True).strip().lower()       
-
-        print(f"MMS transcript: {user_text}")
-
-
-
-    except Exception as e:
-
-        print(f"MMS error: {e}")
-
-        user_text = ""
-
-
-
     ref_clean  = normalize_sanskrit_phonetic(clean_text(ref_mantra))
-
     user_clean = normalize_sanskrit_phonetic(clean_text(user_text))
-
     ref_words  = ref_clean.split()
-
     user_words = user_clean.split()
-
     ref_syllables  = split_syllables(ref_clean)
-
     user_syllables = split_syllables(user_clean)
 
-
-
     char_sim = SequenceMatcher(None, ref_clean,  user_clean).ratio()
-
     if ref_words and user_words:
         word_sim = sum(max(SequenceMatcher(None, rw, uw).ratio() for uw in user_words) for rw in ref_words) / len(ref_words)
     else:
         word_sim = 0.0
-
     syl_sim  = SequenceMatcher(None, ref_syllables, user_syllables).ratio()
-
     text_similarity = (0.20 * char_sim + 0.30 * word_sim + 0.50 * syl_sim) * 100
 
-
-
     # ── Word Alignment (green / white / red) ──
-
     canonical_words_dev = [
-
         "वक्रतुण्ड", "महाकाय", "सूर्यकोटि", "समप्रभ",
-
         "निर्विघ्नं", "कुरुमेदेव", "सर्वकार्येषु", "सर्वदा"
-
     ]
-
     canonical_words_iast = [
-
         "vakratuṇḍa", "mahākāya", "sūryakoṭi", "samaprabha",
-
         "nirvighnam", "kuru me deva", "sarvakāryeṣu", "sarvadā"
-
     ]
-
-
 
     word_alignment = []
-
     for i in range(8):
-
         pe_w = pe_words_list[i] if i < len(pe_words_list) else {}
-
         acoustic_score = pe_w.get("word_match_score", 0.0)
-
-
 
         canon_norm = normalize_sanskrit_phonetic(canonical_words_dev[i])
         canon_no_space = canon_norm.replace(" ", "")
@@ -3081,6 +3224,8 @@ def analyze_chant(user_audio_path: str) -> dict:
 
         # Candidates include single words, 2-word windows, and 3-word windows
         candidates = []
+        if i in matched_ctc_by_canon:
+            candidates.append(matched_ctc_by_canon[i]['span']['text'])
         if user_words:
             for uw in user_words:
                 candidates.append(uw)
@@ -3099,7 +3244,6 @@ def analyze_chant(user_audio_path: str) -> dict:
                 best_lex = ls
                 heard_token = cand
 
-        # Also check substring match against normalized user text
         user_clean_nospace = user_clean.replace(" ", "")
         if canon_no_space and canon_no_space in user_clean_nospace:
             best_lex = max(best_lex, 95.0)
@@ -3108,51 +3252,99 @@ def analyze_chant(user_audio_path: str) -> dict:
 
         lexical_score = best_lex
 
-        # Balanced combination:
-        # If words were heard in the audio, a word CANNOT be considered matched
-        # if the user recited a completely different word (lexical_score < 20.0).
-        if lexical_score >= 35.0:
-            combined = 0.55 * lexical_score + 0.45 * acoustic_score
-        elif lexical_score >= 20.0:
-            combined = 0.50 * lexical_score + 0.50 * min(acoustic_score, 60.0)
-        else:
-            if len(user_words) > 0:
-                # The user recited speech, but said something completely different
-                combined = lexical_score * 0.5
+        # Determine if this word was spoken
+        user_total_dur = len(audio_raw) / sr
+        ref_total_dur = len(ref_audio) / ref_sr
+        is_partial_chant = (user_total_dur < (0.55 * ref_total_dur)) or (len(user_words) < 4)
+
+        has_slice = (pe_w.get("user_start_sec") is not None and pe_w.get("user_end_sec") is not None)
+        if has_slice:
+            if is_partial_chant and (i not in matched_ctc_by_canon) and (lexical_score < 30.0):
+                is_spoken = False
             else:
-                # No transcript available (whisper/heavy noise): fallback to acoustic only if strong
-                combined = acoustic_score * 0.60 if acoustic_score >= 60.0 else 0.0
-
-        if combined >= 65.0:
-            status = "green"
-        elif combined >= 40.0:
-            status = "white"
+                is_spoken = True
         else:
-            status = "red"
+            # Word recognized via CTC anchor or high lexical score (e.g. single-word recitation)
+            if (i in matched_ctc_by_canon) or (lexical_score >= 50.0):
+                is_spoken = True
+                if i in matched_ctc_by_canon:
+                    c_span = matched_ctc_by_canon[i]['span']
+                    s_val = round(c_span['start_sec'] + user_trim_offset_sec, 3)
+                    e_val = round(c_span['end_sec'] + user_trim_offset_sec, 3)
+                else:
+                    s_val = round(user_trim_offset_sec, 3)
+                    e_val = round(user_trim_offset_sec + (len(audio_trimmed) / sr), 3)
+                if e_val <= s_val:
+                    e_val = round(s_val + 0.8, 3)
 
-        # Cross-mantra protection:
-        # If overall text similarity is low (< 25%), a completely different text/mantra was chanted!
-        # Coincidental vowel/syllable overlap must NOT mark any word as green or white.
-        if text_similarity < 25.0 and lexical_score < 70.0:
+                pe_w["user_start_sec"] = s_val
+                pe_w["user_end_sec"] = e_val
+                pe_w["trimmed_user_start_sec"] = s_val
+                pe_w["trimmed_user_end_sec"] = e_val
+                pe_w["duration_sec"] = round(e_val - s_val, 3)
+
+                # Recompute acoustic score for single word if it was 0
+                if acoustic_score < 15.0:
+                    try:
+                        ac_match = pe.compute_local_word_match(
+                            audio_raw, sr, ref_audio, ref_sr,
+                            s_val, e_val,
+                            pe_w.get("ref_start_sec", 0.0), pe_w.get("ref_end_sec", 1.0)
+                        )
+                        acoustic_score = max(acoustic_score, ac_match)
+                        pe_w["word_match_score"] = round(acoustic_score, 1)
+                    except Exception:
+                        pass
+            else:
+                is_spoken = False
+
+        if not is_spoken:
             status = "red"
             combined = 0.0
-
-        # User playback slice: ALWAYS allow the user to hear what was spoken in this word interval
-        user_dur = len(audio) / sr
-        has_spoken_word = (pe_w.get("user_end_sec", 0.0) > pe_w.get("user_start_sec", 0.0)) and (user_dur > 0.8)
-        u_slice_start = pe_w.get("user_start_sec", 0.0) if has_spoken_word else 0.0
-        u_slice_end   = pe_w.get("user_end_sec", 0.0) if has_spoken_word else 0.0
-        final_heard_token = heard_token if (has_spoken_word and (lexical_score >= 25.0 or acoustic_score >= 35.0)) else ""
-
-        # Synchronize phonetic evaluation status with combined macro status:
-        if i < len(pe_words_list):
-            if status == "green":
-                pe_words_list[i]["status"] = "acceptable"
-            elif status == "white" and pe_words_list[i].get("status") == "inconclusive":
-                pe_words_list[i]["status"] = "review"
-            elif status == "red":
+            lexical_score = 0.0
+            acoustic_score = 0.0
+            u_slice_start = None
+            u_slice_end = None
+            final_heard_token = "(not spoken)"
+            if i < len(pe_words_list):
                 pe_words_list[i]["status"] = "inconclusive"
-                pe_words_list[i]["word_match_score"] = min(pe_words_list[i].get("word_match_score", 0.0), combined)
+                pe_words_list[i]["user_start_sec"] = None
+                pe_words_list[i]["user_end_sec"] = None
+                pe_words_list[i]["word_match_score"] = 0.0
+        else:
+            if lexical_score >= 35.0:
+                combined = 0.55 * lexical_score + 0.45 * acoustic_score
+            elif lexical_score >= 25.0:
+                combined = 0.50 * lexical_score + 0.50 * min(acoustic_score, 50.0)
+            else:
+                if len(user_words) > 0:
+                    combined = lexical_score * 0.5
+                else:
+                    combined = acoustic_score * 0.60 if acoustic_score >= 60.0 else 0.0
+
+            if combined >= 65.0:
+                status = "green"
+            elif combined >= 40.0:
+                status = "white"
+            else:
+                status = "red"
+
+            if text_similarity < 30.0 and lexical_score < 70.0:
+                status = "red"
+                combined = 0.0
+
+            u_slice_start = pe_w.get("user_start_sec", 0.0)
+            u_slice_end   = pe_w.get("user_end_sec", 0.0)
+            final_heard_token = heard_token if (lexical_score >= 25.0 or acoustic_score >= 35.0) else ""
+
+            if i < len(pe_words_list):
+                if status == "green":
+                    pe_words_list[i]["status"] = "acceptable"
+                elif status == "white" and pe_words_list[i].get("status") == "inconclusive":
+                    pe_words_list[i]["status"] = "review"
+                elif status == "red":
+                    pe_words_list[i]["status"] = "inconclusive"
+                    pe_words_list[i]["word_match_score"] = min(pe_words_list[i].get("word_match_score", 0.0), combined)
 
         word_alignment.append({
             "index": i,
@@ -3178,78 +3370,44 @@ def analyze_chant(user_audio_path: str) -> dict:
         phonetic_evaluation_data["summary"]["review"] = rev_cnt
         phonetic_evaluation_data["summary"]["inconclusive"] = inc_cnt
 
-
-
     # ── Stage-1 Mantra Verification Gate ──
-
     green_count = sum(1 for wa in word_alignment if wa["status"] == "green")
-
     white_count = sum(1 for wa in word_alignment if wa["status"] == "white")
-
     matched_count = green_count + white_count
 
-
-
     user_duration_sec = len(audio) / sr
-
     ref_duration_sec = len(ref_audio) / ref_sr
-
     duration_ratio = round(user_duration_sec / max(ref_duration_sec, 0.1), 2)
-
-    duration_valid = 0.45 <= duration_ratio <= 2.2
+    duration_valid = 0.45 <= duration_ratio <= 3.2
 
 
 
     is_valid_mantra = (
-
         len(user_words) >= 3 and
-
         matched_count >= 3 and
-
-        text_similarity >= 25.0 and
-
+        green_count >= 1 and
+        text_similarity >= 30.0 and
         duration_valid
-
     )
 
-
-
     if not is_valid_mantra:
-
         if len(user_words) == 0:
-
             gate_message = "No recognizable Sanskrit chanting detected. Please chant the full Ganesha Shloka clearly."
-
         elif len(user_words) < 3:
-
             gate_message = (
-
                 f"Recitation is too brief ({len(user_words)} word(s) heard: '{user_text}'). "
-
                 f"The full Ganesha Shloka requires all 8 words."
-
             )
-
-        elif text_similarity < 25.0:
-
+        elif text_similarity < 30.0:
             gate_message = (
-
                 f"Different chant detected. Text similarity with Ganesha Shloka is only {round(text_similarity, 1)}% "
-
                 f"({matched_count}/8 words verified). Heard: '{user_clean}'."
-
             )
-
-        elif matched_count < 3:
-
+        elif green_count < 1 or matched_count < 3:
             gate_message = (
-
                 f"Recitation does not match the Ganesha Shloka. "
-
-                f"Only {matched_count}/8 words matched (need ≥ 3). "
-
+                f"Only {matched_count}/8 words matched ({green_count} strong, need ≥ 3 matched). "
                 f"Text similarity: {round(text_similarity, 1)}%."
-
             )
 
         elif not duration_valid:
