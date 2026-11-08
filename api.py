@@ -50,15 +50,6 @@ def health():
     return {"status": "ok"}
 
 
-@app.get("/warmup")
-def warmup():
-    """
-    Optional: call this endpoint once after deploy to trigger model loading.
-    Returns immediately — loading happens in background via first /analyze call.
-    """
-    return {"status": "warming up — send an /analyze request to fully load models"}
-
-
 @app.get("/reference-audio")
 def reference_audio():
     """Serves the reference mantra.wav for frontend audio slicing/playback."""

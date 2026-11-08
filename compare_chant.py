@@ -6,7 +6,7 @@ import json
 
 import unicodedata
 
-from transformers import Wav2Vec2ForCTC, Wav2Vec2FeatureExtractor, Wav2Vec2CTCTokenizer
+from transformers import Wav2Vec2ForCTC, AutoProcessor
 
 from sklearn.preprocessing import StandardScaler
 
@@ -62,17 +62,13 @@ if hasattr(sys.stderr, 'reconfigure'):
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# Load Whisper once (shared by direct run and API)
+# ── Global reference models and feature caches (loaded lazily in _load_references) ──
 
-# ── These are safe at module level (just assignments, no I/O) ──
-
-MMS_MODEL = None   # loaded lazily in _load_references()
+MMS_MODEL = None
 
 MMS_FEATURE_EXTRACTOR = None
 
 MMS_TOKENIZER         = {}
-
-MMS_PROCESSOR = None
 
 ref_pitch     = None
 
@@ -146,45 +142,24 @@ def _load_references():
 
     """
 
-    global MMS_MODEL, MMS_FEATURE_EXTRACTOR, MMS_TOKENIZER, MMS_PROCESSOR, ref_pitch, ref_tempo, ref_mfcc
+    global MMS_MODEL, MMS_FEATURE_EXTRACTOR, MMS_TOKENIZER, ref_pitch, ref_tempo, ref_mfcc
 
     global ref_audio, ref_sr, ref_mantra, ref_trim_offset_sec
 
-
-
     if MMS_MODEL is not None:
-
         return   # already loaded — skip
-
-
-
-
 
     print("Loading MMS model and tokenizer...")
 
-    
-
-    from transformers import AutoProcessor
-
-
-
     target_language = "urd-script_devanagari"
-
     model_id = "facebook/mms-1b-all"
 
-
-
     # Use AutoProcessor — try local cache first for speed
-
     try:
-
-        MMS_PROCESSOR = AutoProcessor.from_pretrained(model_id, local_files_only=True)
-
+        mms_proc = AutoProcessor.from_pretrained(model_id, local_files_only=True)
     except Exception:
-
-        MMS_PROCESSOR = AutoProcessor.from_pretrained(model_id)
-
-    MMS_PROCESSOR.tokenizer.set_target_lang(target_language)
+        mms_proc = AutoProcessor.from_pretrained(model_id)
+    mms_proc.tokenizer.set_target_lang(target_language)
 
 
 
@@ -222,11 +197,8 @@ def _load_references():
 
 
 
-    # Tokenizer is handled by the processor now
-
-    MMS_TOKENIZER = MMS_PROCESSOR.tokenizer
-
-    MMS_FEATURE_EXTRACTOR = MMS_PROCESSOR.feature_extractor
+    MMS_TOKENIZER = mms_proc.tokenizer
+    MMS_FEATURE_EXTRACTOR = mms_proc.feature_extractor
 
 
 
@@ -1138,7 +1110,7 @@ def build_word_svara_map(pitch_contour, word_timestamps, audio_sr):
 
     """
 
-    For each word, slices the pitch contour using Whisper timestamps
+    For each word, slices the pitch contour using word alignment timestamps
 
     and classifies dominant_accent + pitch_shape for that word.
 
@@ -1585,23 +1557,6 @@ def score_to_grade(score):
     else:
         return "Prārambhika (Beginner)"
 
- 
-
- 
-
-def score_to_emoji(score):
-
-    if score >= 85: return "✅"
-
-    elif score >= 70: return "🔶"
-
-    elif score >= 50: return "⚠️"
-
-    else: return "❌"
-
- 
-
- 
 
 # ---------- per-dimension feedback builders ----------------------------------
 
@@ -1881,7 +1836,7 @@ def pitch_feedback(pitch_combined, pitch_similarity, zone_sim, accent_sim,
 
     else:
 
-        # Fallback if Whisper timestamps unavailable
+        # Fallback if word-level detail unavailable
 
         if accent_sim < 60:
 
@@ -2399,215 +2354,9 @@ def generate_full_feedback(
     # --- sadhana tip ---
 
     sadhana_tip = generate_sadhana_tip(overall, text_sim, pitch_combined, tempo_similarity, mfcc_similarity)
-
- 
-
-    # ---------------------------------------------------------------
-
-    # PRINT REPORT
-
-    # ---------------------------------------------------------------
-
-    sep = "=" * 62
-
- 
-
-    print(f"\n{sep}")
-
-    print(f"  MANTRA CHANTING FEEDBACK REPORT")
-
-    print(f"  समीक्षा प्रतिवेदन  |  Samīkṣā Prativedana")
-
-    print(sep)
-
- 
-
-    print(f"\n  Overall Score  : {round(overall, 1)}%  →  {overall_grade}  {score_to_emoji(overall)}")
-
-    print(f"\n  Mantra         : {ref_mantra}")
-
-    print(sep)
-
- 
-
-    # ---- Dimension scores ----
-
-    print("\n📊 DIMENSION SCORES")
-
-    print(f"  Ucchāraṇa  (Pronunciation)  : {round(text_sim, 1):5.1f}%  {score_to_emoji(text_sim)}")
-
-    print(f"  Nāda       (Voice Quality)  : {round(mfcc_similarity, 1):5.1f}%  {score_to_emoji(mfcc_similarity)}")
-
-    print(f"  Svara      (Pitch/Accent)   : {round(pitch_combined, 1):5.1f}%  {score_to_emoji(pitch_combined)}")
-
-    print(f"    ↳ Contour shape           : {round(pitch_similarity, 1):5.1f}%")
-
-    print(f"    ↳ Zone (U/A/S) accuracy   : {round(zone_sim, 1):5.1f}%")
-
-    print(f"    ↳ Accent placement        : {round(accent_sim, 1):5.1f}%")
-
-    print(f"    ↳ Syllable shape          : {round(shape_sim, 1):5.1f}%")
-
-    print(f"    ↳ Slope / steepness       : {round(slope_sim, 1):5.1f}%")
-
-    print(f"  Laya       (Rhythm/Tempo)   : {round(tempo_similarity, 1):5.1f}%  {score_to_emoji(tempo_similarity)}")
-
- 
-
-    # ---- Priority issues ----
-
-    print(f"\n🎯 FOCUS AREAS  (ranked by impact)")
-
-    for i, (dim, score, weight, impact) in enumerate(priority_dims, 1):
-
-        gap = 100 - score
-
-        print(f"  {i}. {dim:<32} Score: {round(score,1)}%  Gap: {round(gap,1)}%  Impact: {impact}")
-
-    # ---- What you did well ----
-
     all_praises = uc_praises + sv_praises + la_praises + na_praises
 
-    if all_praises:
-
-        print(f"\n✨ WHAT YOU DID WELL  (Sādhu! साधु!)")
-
-        for p in all_praises:
-
-            print(f"  ✓ {p}")
-
- 
-
-    # ---- Ucchāraṇa ----
-
-    print(f"\n🔤 UCCHĀRAṆA  (Pronunciation)  —  {round(text_sim, 1)}%  {score_to_emoji(text_sim)}")
-
-    if uc_issues:
-
-        print("  Issues:")
-
-        for issue in uc_issues:
-
-            print(f"    • {issue}")
-
-        print("  How to improve:")
-
-        for fix in uc_fixes:
-
-            print(f"    → {fix}")
-
-    else:
-
-        print("  ✓ No significant pronunciation issues detected")
-
- 
-
-    # ---- Svara ----
-
-    print(f"\n🎵 SVARA  (Pitch / Vedic Accent)  —  {round(pitch_combined, 1)}%  {score_to_emoji(pitch_combined)}")
-
-    if sv_issues:
-
-        print("  Summary:")
-
-        for issue in sv_issues:
-
-            print(f"    • {issue}")
-
-    if sv_per_word:
-
-        print("\n  Word-by-word svara breakdown:")
-
-        print("  " + "-" * 54)
-
-        for detail in sv_per_word:
-
-            for line in detail.split("\n"):
-
-                print(f"    {line}")
-
-            print()
-
-    if sv_fixes:
-
-        print("  General practice techniques:")
-
-        for fix in sv_fixes:
-
-            print(f"    → {fix}")
-
-    if not sv_issues and not sv_per_word:
-
-        print("  ✓ Svara accuracy is good — pitch accents are well-placed")
-
- 
-
-    # ---- Laya ----
-
-    print(f"\n🥁 LAYA  (Rhythm / Tempo)  —  {round(tempo_similarity, 1)}%  {score_to_emoji(tempo_similarity)}")
-
-    if la_issues:
-
-        print("  Issues:")
-
-        for issue in la_issues:
-
-            print(f"    • {issue}")
-
-        print("  How to improve:")
-
-        for fix in la_fixes:
-
-            print(f"    → {fix}")
-
-    else:
-
-        print("  ✓ Laya is steady — rhythmic flow matches the reference well")
-
- 
-
-    # ---- Nāda ----
-
-    print(f"\n🔔 NĀDA  (Voice Quality / Resonance)  —  {round(mfcc_similarity, 1)}%  {score_to_emoji(mfcc_similarity)}")
-
-    if na_issues:
-
-        print("  Issues:")
-
-        for issue in na_issues:
-
-            print(f"    • {issue}")
-
-        print("  How to improve:")
-
-        for fix in na_fixes:
-
-            print(f"    → {fix}")
-
-    else:
-
-        print("  ✓ Nāda quality is authentic — resonance matches the reference")
-
- 
-
-    # ---- Sadhana tip ----
-
-    print(f"\n🪔 DAILY SĀDHANA RECOMMENDATION")
-
-    print(f"  {sadhana_tip}")
-
- 
-
-    print(f"\n{sep}")
-
-    print("  Om Shanti  🙏  |  ॐ शान्तिः")
-
-    print(sep + "\n")
-
- 
-
     # Return structured dict for programmatic use / UI display
-
     return {
 
         "overall_score" : round(overall, 2),
@@ -2726,7 +2475,6 @@ def _build_empty_or_silence_response(msg):
             "summary": {"total_words": 8, "acceptable": 0, "review": 0, "inconclusive": 8, "average_word_score": 0.0},
             "words": pe_words
         },
-        "word_timestamps": [],
         "svara_word_detail": [],
         "duration_ratio": 0.0,
         "dimensions": {
@@ -3186,7 +2934,7 @@ def analyze_chant(user_audio_path: str) -> dict:
                 "end": pw.get("user_end_sec", 0.0),
             })
 
-    # ── 4. Text / Whisper ──
+    # ── 4. Text Recognition (MMS-1B) ──
     ref_clean  = normalize_sanskrit_phonetic(clean_text(ref_mantra))
     user_clean = normalize_sanskrit_phonetic(clean_text(user_text))
     ref_words  = ref_clean.split()
@@ -3533,22 +3281,6 @@ def analyze_chant(user_audio_path: str) -> dict:
     feedback_result["user_transcript"]   = user_text
 
     feedback_result["phonetic_evaluation"] = phonetic_evaluation_data
-
-    feedback_result["word_timestamps"]   = [
-
-        {
-
-            "word": wt["word"],
-
-            "start": round(wt["start"] + user_trim_offset_sec, 3),
-
-            "end": round(wt["end"] + user_trim_offset_sec, 3)
-
-        }
-
-        for wt in word_timestamps_data
-
-    ]
 
     feedback_result["svara_word_detail"] = word_svara_feedback
 
