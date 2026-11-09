@@ -157,23 +157,120 @@ Swara-Vaidya/
 
 ---
 
-### Step 1: Set Up Backend
+### Option 1: Quickstart Using VS Code (Recommended)
 
-#### Windows (PowerShell):
+This is the easiest and recommended way to set up and run Svara Vaidya:
+
+1. **Open the Project Folder:**
+   - Launch Visual Studio Code.
+   - Click **File > Open Folder...** and select the `Swara-Vaidya` root folder.
+
+2. **Open the Integrated Terminal:**
+   - Open the terminal inside VS Code by pressing ``Ctrl + ` `` (or select **Terminal > New Terminal** from the menu).
+
+3. **Create the Python Virtual Environment:**
+   - In the terminal, run:
+   ```powershell
+   python -m venv .venv
+   .\.venv\Scripts\python.exe -m pip install --upgrade pip
+   .\.venv\Scripts\python.exe -m pip install -r requirements.txt
+   ```
+   *(Optional for NVIDIA GPU users: run `.\.venv\Scripts\python.exe -m pip install torch torchaudio torchvision --index-url https://download.pytorch.org/whl/cu124` for Tensor Core acceleration).*
+
+4. **Select the Python Interpreter in VS Code:**
+   - Press `Ctrl + Shift + P` (or `Cmd + Shift + P` on macOS) to open the Command Palette.
+   - Type and select **Python: Select Interpreter**.
+   - Choose the project environment: `Python 3.11 (.venv) .\.venv\Scripts\python.exe`.
+   - VS Code will now automatically use `.venv` for code intelligence and terminal sessions.
+
+5. **Install Frontend Dependencies:**
+   - In the terminal, navigate to `frontend` and install Node packages:
+   ```powershell
+   cd frontend
+   npm install
+   cd ..
+   ```
+
+6. **Start the Backend API Server (Terminal 1):**
+   - Start the FastAPI backend:
+   ```powershell
+   .\.venv\Scripts\python.exe -m uvicorn api:app --reload --port 10000
+   ```
+   - You will see:
+     ```text
+     Uvicorn running on http://127.0.0.1:10000 (Press CTRL+C to quit)
+     ```
+   - On first chant analysis, the backend automatically prints whether it detected a GPU or CPU:
+     - On GPU: `MMS Sanskrit model loaded on GPU: NVIDIA GeForce RTX 3050 Laptop GPU (FP16 Tensor Core acceleration)`
+     - On CPU: `MMS Sanskrit model loaded on CPU.`
+
+7. **Start the Frontend Application (Terminal 2):**
+   - In the VS Code terminal header, click the **+ (New Terminal)** or **Split Terminal** button to open a second terminal tab.
+   - Run:
+   ```powershell
+   cd frontend
+   npm run dev
+   ```
+   - Vite will display:
+     ```text
+     VITE ready in 250 ms
+     Local: http://localhost:5173/
+     ```
+
+8. **Open the Web Application:**
+   - Open your browser to `http://localhost:5173`.
+   - Click **Start Chanting** to test your microphone, or drag-and-drop an audio file to analyze.
+
+---
+
+### Option 2: Quickstart Using Standalone Terminals (PowerShell, Command Prompt, macOS, Linux)
+
+If you prefer to run the project using standard operating system terminals:
+
+#### 1. Backend Setup and Execution
+
+##### Windows (PowerShell):
 ```powershell
 # 1. Navigate to project root
 cd c:\projects\Swara-Vaidya
 
-# 2. Create and activate a virtual environment
+# 2. Create virtual environment
 python -m venv .venv
+
+# 3. Allow script execution in current PowerShell window (fixes PSSecurityException)
+Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope Process
+
+# 4. Activate the virtual environment
 .\.venv\Scripts\Activate.ps1
 
-# 3. Upgrade pip and install dependencies
+# 5. Upgrade pip and install dependencies
 pip install --upgrade pip
 pip install -r requirements.txt
+
+# 6. Start backend server
+python -m uvicorn api:app --host 0.0.0.0 --port 10000 --reload
 ```
 
-#### macOS and Linux (Terminal):
+##### Windows (Command Prompt - cmd.exe):
+```cmd
+cd c:\projects\Swara-Vaidya
+python -m venv .venv
+.\.venv\Scripts\activate.bat
+pip install --upgrade pip
+pip install -r requirements.txt
+python -m uvicorn api:app --host 0.0.0.0 --port 10000 --reload
+```
+
+##### Windows Direct Execution (No activation needed, avoids script execution blocks):
+```powershell
+cd c:\projects\Swara-Vaidya
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install --upgrade pip
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+.\.venv\Scripts\python.exe -m uvicorn api:app --host 0.0.0.0 --port 10000 --reload
+```
+
+##### macOS and Linux (Terminal):
 ```bash
 # 1. Navigate to project root
 cd Swara-Vaidya
@@ -185,27 +282,12 @@ source .venv/bin/activate
 # 3. Upgrade pip and install dependencies
 pip install --upgrade pip
 pip install -r requirements.txt
-```
 
----
-
-### Step 2: Start the Backend API Server
-
-```bash
+# 4. Start backend server
 python -m uvicorn api:app --host 0.0.0.0 --port 10000 --reload
 ```
 
-The API will bind to `http://localhost:10000`. Test the health endpoint:
-```bash
-curl http://localhost:10000/health
-# {"status":"ok"}
-```
-
----
-
-### Step 3: Start the Frontend Application
-
-Open a second terminal window:
+#### 2. Frontend Setup and Execution (In a Second Terminal Window)
 
 ```bash
 cd frontend
@@ -217,11 +299,19 @@ npm install
 npm run dev
 ```
 
-Open your browser at `http://localhost:5173`:
-1. Click **● Start Chanting** to record live from your microphone, or drag-and-drop an audio or video file (`.wav`, `.mp3`, `.m4a`, `.ogg`, `.flac`, `.mov`, `.mp4`).
-2. Watch the live 60 FPS waveform oscillate in the canvas.
-3. Click **Start Vedic Analysis**.
-4. The application will automatically transition to **Page 2 (Analysis Dashboard)** with full Vedic scores, dual audio slice playback, and daily practice recommendations.
+Open your browser at `http://localhost:5173`.
+
+---
+
+### Hardware Compatibility (CPU and GPU Support)
+
+Svara Vaidya runs seamlessly on any machine:
+- **CPU Mode (Universal for all PCs):** If your computer has no dedicated graphics card, the application automatically runs on your CPU in standard FP32 mode. No special drivers or NVIDIA setup are required.
+- **NVIDIA GPU Acceleration (Optional):** If your machine has an NVIDIA graphics card (GeForce RTX, GTX, or Quadro), you can enable FP16 Tensor Core acceleration by installing the CUDA PyTorch wheel:
+```powershell
+.\.venv\Scripts\python.exe -m pip install torch torchaudio torchvision --index-url https://download.pytorch.org/whl/cu124
+```
+*(On GPU, inference automatically uses 16-bit half precision, speeding up analysis to approximately 2 seconds).*
 
 ---
 

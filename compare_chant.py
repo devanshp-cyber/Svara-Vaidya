@@ -38,8 +38,6 @@ os.environ.setdefault('HF_HUB_OFFLINE', '1')
 
 os.environ.setdefault('TRANSFORMERS_OFFLINE', '1')
 
-
-
 if hasattr(sys.stdout, 'reconfigure'):
 
     try:
@@ -146,6 +144,7 @@ def _load_references():
 
     global ref_audio, ref_sr, ref_mantra, ref_trim_offset_sec
 
+    
     if MMS_MODEL is not None:
         return   # already loaded — skip
 
@@ -193,6 +192,14 @@ def _load_references():
 
         MMS_MODEL.load_adapter(target_language)
 
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    if device == "cuda":
+        gpu_name = torch.cuda.get_device_name(0)
+        print(f"MMS Sanskrit model loaded on GPU: {gpu_name} (FP16 Tensor Core acceleration)")
+        MMS_MODEL = MMS_MODEL.half()
+    else:
+        print("MMS Sanskrit model loaded on CPU.")
+    MMS_MODEL = MMS_MODEL.to(device)
     MMS_MODEL.eval()
 
 
@@ -2672,8 +2679,15 @@ def analyze_chant(user_audio_path: str) -> dict:
     # ── CTC Word Segmentation & Active Analysis Window ──
     audio_16k = audio
     inputs = MMS_FEATURE_EXTRACTOR(audio_16k, sampling_rate=16000, return_tensors="pt")
-    with torch.no_grad():
-        logits = MMS_MODEL(**inputs).logits
+
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    if device == "cuda":
+        inputs = {k: v.to(device).half() if v.dtype == torch.float32 else v.to(device) for k, v in inputs.items()}
+    else:
+        inputs = inputs.to(device)
+
+    with torch.inference_mode():
+        logits = MMS_MODEL(**inputs).logits.cpu()
     predicted_ids = torch.argmax(logits, dim=-1)
     user_text = MMS_TOKENIZER.decode(predicted_ids[0].tolist(), skip_special_tokens=True).strip().lower()
     print(f"MMS transcript: {user_text}")
@@ -2783,8 +2797,12 @@ def analyze_chant(user_audio_path: str) -> dict:
                 active_crop_offset_sec = crop_start
                 try:
                     cropped_inputs = MMS_FEATURE_EXTRACTOR(audio, sampling_rate=16000, return_tensors="pt")
-                    with torch.no_grad():
-                        cropped_logits = MMS_MODEL(**cropped_inputs).logits
+                    if device == "cuda":
+                        cropped_inputs = {k: v.to(device).half() if v.dtype == torch.float32 else v.to(device) for k, v in cropped_inputs.items()}
+                    else:
+                        cropped_inputs = cropped_inputs.to(device)
+                    with torch.inference_mode():
+                        cropped_logits = MMS_MODEL(**cropped_inputs).logits.cpu()
                     cropped_pids = torch.argmax(cropped_logits, dim=-1)
                     user_text = MMS_TOKENIZER.decode(cropped_pids[0].tolist(), skip_special_tokens=True).strip().lower()
                 except Exception:
@@ -2795,7 +2813,7 @@ def analyze_chant(user_audio_path: str) -> dict:
         audio,
         sr=sr,
         fmin=librosa.note_to_hz('C2'),
-        fmax=librosa.note_to_hz('C7')
+        fmax=librosa.note_to_hz('C6')
     )
     pitch = np.nan_to_num(pitch)
 
