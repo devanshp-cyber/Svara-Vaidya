@@ -65,7 +65,7 @@ def analyze(file: UploadFile = File(...)):
     Upload user chant audio → returns full feedback JSON.
     """
     print(f"--> Received /analyze request with file: {file.filename}", flush=True)
-    allowed = (".wav", ".mp3", ".mpeg", ".mpga", ".m4a", ".aac", ".ogg", ".flac", ".webm")
+    allowed = (".wav", ".mp3", ".mpeg", ".mpga", ".m4a", ".aac", ".ogg", ".flac", ".webm", ".mov", ".mp4", ".m4v", ".3gp")
     if not file.filename.lower().endswith(allowed):
         raise HTTPException(status_code=400, detail=f"Audio file required: {allowed}")
 

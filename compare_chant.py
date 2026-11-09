@@ -2510,6 +2510,128 @@ def _build_empty_or_silence_response(msg):
 
 # =============================================================================
 
+def load_audio_safely(path: str, target_sr: int = 16000):
+    """
+    Robust audio loader supporting standard audio formats (WAV, MP3, FLAC, OGG)
+    via librosa/soundfile, with zero-dependency fallbacks for scipy.io.wavfile
+    and QuickTime/MOV/MP4 video/audio containers (LPCM 16/24/32-bit).
+    """
+    try:
+        y, sr = librosa.load(path, sr=target_sr)
+        return y.astype(float), sr
+    except Exception:
+        pass
+
+    try:
+        import scipy.io.wavfile as wavfile
+        sr_native, data = wavfile.read(path)
+        if data.dtype == np.int16:
+            y = data.astype(np.float32) / 32768.0
+        elif data.dtype == np.int32:
+            y = data.astype(np.float32) / 2147483648.0
+        elif data.dtype == np.uint8:
+            y = (data.astype(np.float32) - 128.0) / 128.0
+        else:
+            y = data.astype(np.float32)
+        if y.ndim > 1:
+            y = y.mean(axis=1)
+        if sr_native != target_sr:
+            y = librosa.resample(y, orig_sr=sr_native, target_sr=target_sr)
+        return y.astype(float), target_sr
+    except Exception:
+        pass
+
+    try:
+        import struct
+        with open(path, 'rb') as f:
+            data = f.read()
+
+        trak_soun = data.find(b'mhlrsoun')
+        if trak_soun != -1:
+            sr_native = 44100
+            mdhd_pos = data.find(b'mdhd', max(0, trak_soun - 400), trak_soun + 400)
+            if mdhd_pos != -1:
+                sr_native = int.from_bytes(data[mdhd_pos+20:mdhd_pos+24], 'big')
+
+            stsd_idx = data.find(b'stsd', trak_soun)
+            num_channels = 2
+            bits_per_sample = 16
+            is_big_endian = False
+
+            lpcm_idx = data.find(b'lpcm', stsd_idx, stsd_idx + 300)
+            if lpcm_idx != -1:
+                ver = int.from_bytes(data[lpcm_idx+12:lpcm_idx+14], 'big')
+                if ver == 2:
+                    sr_native = int(struct.unpack('>d', data[lpcm_idx+36:lpcm_idx+44])[0])
+                    num_channels = int.from_bytes(data[lpcm_idx+44:lpcm_idx+48], 'big')
+                    bits_per_sample = int.from_bytes(data[lpcm_idx+52:lpcm_idx+56], 'big')
+                    flags = int.from_bytes(data[lpcm_idx+56:lpcm_idx+60], 'big')
+                    is_big_endian = bool(flags & 2)
+                else:
+                    num_channels = int.from_bytes(data[lpcm_idx+20:lpcm_idx+22], 'big')
+                    bits_per_sample = int.from_bytes(data[lpcm_idx+22:lpcm_idx+24], 'big')
+
+            stsc_idx = data.find(b'stsc', trak_soun)
+            stsc_entries = int.from_bytes(data[stsc_idx+8:stsc_idx+12], 'big')
+            stsc_table = []
+            for i in range(stsc_entries):
+                fc, spc, desc = struct.unpack('>III', data[stsc_idx+12+i*12:stsc_idx+24+i*12])
+                stsc_table.append((fc, spc))
+
+            stco_idx = data.find(b'stco', trak_soun)
+            chunk_offsets = []
+            if stco_idx != -1:
+                entries = int.from_bytes(data[stco_idx+8:stco_idx+12], 'big')
+                for i in range(entries):
+                    chunk_offsets.append(int.from_bytes(data[stco_idx+12+i*4:stco_idx+16+i*4], 'big'))
+            else:
+                co64_idx = data.find(b'co64', trak_soun)
+                if co64_idx != -1:
+                    entries = int.from_bytes(data[co64_idx+8:co64_idx+12], 'big')
+                    for i in range(entries):
+                        chunk_offsets.append(int.from_bytes(data[co64_idx+12+i*8:co64_idx+20+i*8], 'big'))
+
+            bytes_per_sample = (bits_per_sample // 8) * num_channels
+            audio_bytes = bytearray()
+            for chunk_idx, offset in enumerate(chunk_offsets, 1):
+                spc = 0
+                for fc, samples_in_c in reversed(stsc_table):
+                    if chunk_idx >= fc:
+                        spc = samples_in_c
+                        break
+                chunk_len = spc * bytes_per_sample
+                audio_bytes.extend(data[offset:offset+chunk_len])
+
+            raw = bytes(audio_bytes)
+            if bits_per_sample == 16:
+                dtype = '>i2' if is_big_endian else '<i2'
+                arr = np.frombuffer(raw, dtype=dtype).astype(np.float32) / 32768.0
+            elif bits_per_sample == 24:
+                u = np.frombuffer(raw, dtype=np.uint8).reshape(-1, 3)
+                if is_big_endian:
+                    i32 = (u[:, 0].astype(np.int32) << 16) | (u[:, 1].astype(np.int32) << 8) | u[:, 2].astype(np.int32)
+                else:
+                    i32 = u[:, 0].astype(np.int32) | (u[:, 1].astype(np.int32) << 8) | (u[:, 2].astype(np.int32) << 16)
+                i32[i32 >= 0x800000] -= 0x1000000
+                arr = i32.astype(np.float32) / 8388608.0
+            elif bits_per_sample == 32:
+                dtype = '>i4' if is_big_endian else '<i4'
+                arr = np.frombuffer(raw, dtype=dtype).astype(np.float32) / 2147483648.0
+            else:
+                raise ValueError(f'Unsupported bits per sample: {bits_per_sample}')
+
+            if num_channels > 1:
+                arr = arr.reshape(-1, num_channels).mean(axis=1)
+
+            if sr_native != target_sr:
+                arr = librosa.resample(arr, orig_sr=sr_native, target_sr=target_sr)
+            return arr.astype(float), target_sr
+    except Exception as e:
+        raise RuntimeError(f"Could not decode audio from {path}: {e}")
+
+    raise RuntimeError(f"Unsupported audio format in {path}")
+
+
 def analyze_chant(user_audio_path: str) -> dict:
 
     """
@@ -2531,7 +2653,7 @@ def analyze_chant(user_audio_path: str) -> dict:
 
 
     # ── Load user chant ──
-    audio_raw, sr = librosa.load(user_audio_path, sr=16000)
+    audio_raw, sr = load_audio_safely(user_audio_path, target_sr=16000)
 
     user_dur = float(len(audio_raw) / sr)
 
