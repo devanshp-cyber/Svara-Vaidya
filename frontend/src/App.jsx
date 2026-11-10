@@ -2721,7 +2721,7 @@ export default function App() {
               }}
             >
               {[
-                { id: "phonetic", icon: "🔬", label: "8-Word Phonetic Studio", count: phoneticWords.length || 8 },
+                { id: "phonetic", icon: "🔬", label: `${phoneticWords.length || 8}-Word Phonetic Studio`, count: phoneticWords.length || 8 },
                 { id: "uccharana", icon: "🔤", label: "Ucchāraṇa (Pronunciation)" },
                 { id: "svara", icon: "🎵", label: "Svara (Pitch & Accent)" },
                 { id: "layanada", icon: "🥁", label: "Laya & Nāda (Rhythm & Timbre)" },

@@ -6,7 +6,8 @@ from fastapi import FastAPI, File, UploadFile, HTTPException, Form, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, FileResponse
 from typing import Optional
-import tempfile, shutil, os, sys, traceback
+import tempfile, shutil, os, sys, traceback, threading
+from mantras import MANTRAS, DEFAULT_MANTRA_ID, get_mantra_info
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -21,8 +22,7 @@ if hasattr(sys.stderr, 'reconfigure'):
     except Exception:
         pass
 
-# ── compare_chant is imported lazily on first request ──
-# This lets uvicorn bind the port immediately, before heavy libs load.
+# ── compare_chant is loaded lazily or via background pre-warming ──
 compare_chant = None
 
 app = FastAPI(title="Svara Vaidya API", version="1.0")
@@ -36,13 +36,13 @@ app.add_middleware(
 
 
 def get_compare_chant():
-    """Import compare_chant once, on first use."""
+    """Import compare_chant once, on first use or via background pre-warm."""
     global compare_chant
     if compare_chant is None:
-        print("Loading compare_chant module (first request)...")
+        print("Loading compare_chant module (heavy ML models)...", flush=True)
         import compare_chant as _cc
         compare_chant = _cc
-        print("compare_chant loaded.")
+        print("compare_chant loaded successfully.", flush=True)
     return compare_chant
 
 
@@ -53,16 +53,17 @@ def health():
 
 @app.get("/mantras")
 def list_mantras():
-    """Returns available mantras and their metadata."""
-    cc = get_compare_chant()
-    return JSONResponse(content=list(cc.MANTRAS.values()))
+    """Returns available mantras and their metadata instantaneously."""
+    return JSONResponse(content=list(MANTRAS.values()))
 
 
 @app.get("/reference-audio")
 def reference_audio(mantra_id: str = "ganesha"):
-    """Serves the reference audio for frontend audio slicing/playback."""
-    cc = get_compare_chant()
-    minfo = cc.MANTRAS.get(mantra_id, cc.MANTRAS["ganesha"])
+    """
+    Serves the reference audio for frontend audio slicing/playback instantaneously (< 5ms)
+    without blocking on heavy ML model initialization.
+    """
+    minfo = get_mantra_info(mantra_id)
     audio_path = os.path.join(BASE_DIR, minfo["audio_file"])
     if not os.path.exists(audio_path):
         raise HTTPException(status_code=404, detail=f"Reference audio not found for {mantra_id}")

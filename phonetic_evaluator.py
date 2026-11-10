@@ -574,11 +574,13 @@ def evaluate_phonetics(
     user_audio_path: str,
     ref_audio_path: str = DEFAULT_REF_AUDIO,
     annotation_path: str = DEFAULT_ANNOTATION_FILE,
-    precomputed_dtw_wp=None
+    precomputed_dtw_wp=None,
+    user_word_boundaries=None,
+    user_trim_offset_sec_override=None
 ) -> dict:
     """
     Top-level master evaluation function.
-    Evaluates user audio against the reference Ganesha Shloka annotations.
+    Evaluates user audio against the reference annotations.
     """
     annotations = load_ref_annotations(annotation_path)
     ref_words_raw = annotations.get("words", [])
@@ -586,7 +588,10 @@ def evaluate_phonetics(
     # Load, trim on raw audio first for exact sample offset, then bandpass/denoise
     user_audio_raw, user_sr = librosa.load(user_audio_path, sr=16000)
     user_audio_trimmed, user_trim_idx = librosa.effects.trim(user_audio_raw, top_db=30)
-    user_trim_offset_sec = float(user_trim_idx[0]) / user_sr
+    if user_trim_offset_sec_override is not None:
+        user_trim_offset_sec = float(user_trim_offset_sec_override)
+    else:
+        user_trim_offset_sec = float(user_trim_idx[0]) / user_sr
     user_audio = preprocess_for_analysis(user_audio_trimmed, user_sr)
 
     ref_audio_raw, ref_sr = librosa.load(ref_audio_path, sr=16000)
@@ -617,14 +622,39 @@ def evaluate_phonetics(
                 ]
 
     # 1. Word-level alignment
-    aligned_words = align_user_to_reference(
-        user_audio=user_audio,
-        user_sr=user_sr,
-        ref_audio=ref_audio,
-        ref_sr=ref_sr,
-        ref_words=ref_words,
-        precomputed_wp=precomputed_dtw_wp
-    )
+    if user_word_boundaries and len(user_word_boundaries) == len(ref_words):
+        aligned_words = []
+        for i, w in enumerate(ref_words):
+            ub = user_word_boundaries[i]
+            u_s = ub.get("start_sec")
+            u_e = ub.get("end_sec")
+            u_dur = round(u_e - u_s, 3) if (u_s is not None and u_e is not None) else 0.0
+            r_start = w["start_sec"]
+            r_end = w["end_sec"]
+            aligned_words.append({
+                "index": w["index"],
+                "devanagari": w["devanagari"],
+                "iast": w["iast"],
+                "raw_ref_start_sec": w.get("raw_start_sec", r_start),
+                "raw_ref_end_sec": w.get("raw_end_sec", r_end),
+                "ref_start_sec": r_start,
+                "ref_end_sec": r_end,
+                "ref_duration_sec": r_end - r_start,
+                "user_start_sec": u_s,
+                "user_end_sec": u_e,
+                "user_duration_sec": u_dur,
+                "alignment_confidence": ub.get("confidence", 0.90),
+                "phonetic_contrasts": w.get("phonetic_contrasts", [])
+            })
+    else:
+        aligned_words = align_user_to_reference(
+            user_audio=user_audio,
+            user_sr=user_sr,
+            ref_audio=ref_audio,
+            ref_sr=ref_sr,
+            ref_words=ref_words,
+            precomputed_wp=precomputed_dtw_wp
+        )
 
     evaluated_words = []
     acceptable_count = 0

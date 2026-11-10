@@ -82,38 +82,7 @@ ref_mantra    = None
 
 ref_trim_offset_sec = 0.0
 
-GANESHA_MANTRA_TEXT = "वक्रतुण्ड महाकाय सूर्यकोटि समप्रभ निर्विघ्नं कुरुमेदेव सर्वकार्येषु सर्वदा"
-
-MANTRAS = {
-    "ganesha": {
-        "id": "ganesha",
-        "name": "Shri Ganesha Shloka",
-        "subtitle": "Vakratuṇḍa Mahākāya",
-        "audio_file": "mantra.wav",
-        "config_file": "ganesha_shloka.json",
-        "features_file": "reference_features.json",
-        "default_text": "वक्रतुण्ड महाकाय सूर्यकोटि समप्रभ निर्विघ्नं कुरुमेदेव सर्वकार्येषु सर्वदा"
-    },
-    "mrityunjaya": {
-        "id": "mrityunjaya",
-        "name": "Maha Mrityunjaya Mantra",
-        "subtitle": "Tryambakaṃ Yajāmahe",
-        "audio_file": "maha_mrityunjaya_mantra.wav",
-        "config_file": "maha_mrityunjaya_shloka.json",
-        "features_file": "mrityunjaya_reference_features.json",
-        "default_text": "त्र्यम्बकं यजामहे सुगन्धिं पुष्टिवर्धनम् उर्वारुकमिव बन्धनान् मृत्योर्मुक्षीय मामृतात्"
-    },
-    "gayatri": {
-        "id": "gayatri",
-        "name": "Gayatri Mantra",
-        "subtitle": "Savitṛ Gāyatrī",
-        "audio_file": "gayatri_mantra.wav",
-        "config_file": "gayatri_shloka.json",
-        "features_file": "gayatri_reference_features.json",
-        "default_text": "ॐ भूर्भुवः स्वः तत्सवितुर्वरेण्यं भर्गो देवस्य धीमहि धियो यो नः प्रचोदयात्"
-    }
-}
-DEFAULT_MANTRA_ID = "ganesha"
+from mantras import MANTRAS, DEFAULT_MANTRA_ID
 active_mantra_id = None
 
 
@@ -1439,85 +1408,30 @@ def normalize_sanskrit_phonetic(text):
     t = text
     t = unicodedata.normalize("NFC", t)
 
-    # Collapse only the known compound splits while keeping spaces between the 8 words
-    t = re.sub(r'वक्र\s*तु[ण्ं]ड[ं]?', 'वक्रतुण्ड', t)
-    t = re.sub(r'महा\s*काय[ा]?', 'महाकाय', t)
-    t = re.sub(r'सू[रर्][ि]?य\s*को[टत][ीि]?', 'सूर्यकोटि', t)
-    t = re.sub(r'सु[रर्][ि]?य\s*को[टत][ीि]?', 'सूर्यकोटि', t)
-    t = re.sub(r'सूर्य\s*को[टत][ीि]?', 'सूर्यकोटि', t)
-    t = re.sub(r'सम\s*[पबफ़][्र]?भ[ा]?', 'समप्रभ', t)
-    t = re.sub(r'न[िी]?र[्]?\s*[वब][िीे]?[घ्गख][्]?(?:[नन्मं]+|[लत][ा]?)?', 'निर्विघ्नं', t)
-    t = re.sub(r'कोरो\s*मे?\s*[तद]े?\s*व', 'कुरुमेदेव', t)
-    t = re.sub(r'कु\s*र[ुू]?\s*मे?\s*[तद]े?\s*व', 'कुरुमेदेव', t)
-    t = re.sub(r'स[रर्]्व?\s*का[रर्][ि]?य[े]?[शष][ुू]?', 'सर्वकार्येषु', t)
-    t = re.sub(r'स[रर्]व[दन][ा]?', 'सर्वदा', t)
-
-    # Rejoin explicit known compound splits (Ganesha Shloka)
-    t = t.replace("कुरु मे देव", "कुरुमेदेव")
-    t = t.replace("कुरु में देव", "कुरुमेदेव")
-    t = t.replace("कुरु मेंदेव", "कुरुमेदेव")
-    t = t.replace("कुरु मेदेव", "कुरुमेदेव")
-    t = t.replace("सूर्य कोटि", "सूर्यकोटि")
-    t = t.replace("सूर्य कोटी", "सूर्यकोटि")
-    t = t.replace("सर्व कार्येषु", "सर्वकार्येषु")
-    t = t.replace("सर्व कार्येश", "सर्वकार्येषु")
-    t = t.replace("महा काय", "महाकाय")
-    t = t.replace("सम प्रभ", "समप्रभ")
-    t = t.replace("वक्र तुण्ड", "वक्रतुण्ड")
-    t = t.replace("वक्र तुंड", "वक्रतुण्ड")
-
-    # Rejoin explicit known compound splits (Maha Mrityunjaya Mantra)
-    t = t.replace("त्रियम्बकं", "त्र्यम्बकं")
-    t = t.replace("त्रियमबकम", "त्र्यम्बकं")
-    t = t.replace("यजामहें", "यजामहे")
-    t = t.replace("सुगनधिन", "सुगन्धिं")
-    t = t.replace("पुश्ठीवर्धनम", "पुष्टिवर्धनम्")
-    t = t.replace("रवार कमी", "उर्वारुकमिव")
-    t = t.replace("रवारकमी", "उर्वारुकमिव")
-    t = t.replace("वाबनधनान", "बन्धनान्")
-    t = t.replace("मरित्योर मुख्शी", "मृत्योर्मुक्षीय")
-    t = t.replace("मरित्योर", "मृत्योर्")
-    t = t.replace("मुख्शी", "मुक्षीय")
-    t = t.replace("यमामरता त", "मामृतात्")
-    t = t.replace("यमामरता", "मामृतात्")
-
-    # Rejoin explicit known compound splits (Gayatri Mantra)
-    t = t.replace("ऊम", "ॐ")
-    t = t.replace("भूर भुवस्वाह", "भूर्भुवः स्वः")
-    t = t.replace("भूर भुवः", "भूर्भुवः")
-    t = t.replace("भूर भुव", "भूर्भुवः")
-    t = re.sub(r'भूर(?!्)', 'भूर्', t)
-    t = t.replace("भुवस्वाह", "भुवः स्वः")
-    t = t.replace("तसवितुर वरेनुम", "तत्सवितुर्वरेण्यं")
-    t = t.replace("तसवितुर", "तत्सवितुर")
-    t = t.replace("त्सा वितुर", "तत्सवितुर")
-    t = t.replace("वरेनुम", "वरेण्यं")
-    t = t.replace("वरे निम", "वरेण्यं")
-    t = t.replace("भरगो", "भर्गो")
-    t = t.replace("दी मही", "धीमहि")
-    t = t.replace("नफ़", "नः")
-    t = t.replace("प्रछोद या त", "प्रचोदयात्")
-    t = t.replace("प्रछोद या", "प्रचोदयात्")
-    t = t.replace("प्रछोद", "प्रचोद")
-    t = t.replace("प्रचोद या त", "प्रचोदयात्")
-    t = t.replace("प्रचोद या", "प्रचोदयात्")
-    t = re.sub(r'्+', '्', t)
-
-    # Anusvāra ↔ homorganic nasal equivalences
+    # 1. Homorganic nasal ↔ Anusvāra equivalences (Pāṇini 8.4.58 anusvārasya yayi parasavarṇaḥ)
     t = t.replace("म्ब", "ंब").replace("म्प", "ंप")
     t = t.replace("न्द", "ंद").replace("न्ध", "ंध").replace("न्त", "ंत").replace("न्न", "ंन")
     t = t.replace("ण्ड", "ंड").replace("ण्ट", "ंट")
     t = t.replace("ङ्क", "ंक").replace("ङ्ग", "ंग")
-    t = t.replace("ग्न", "घ्न")  # nirvighnam MMS variant
+    t = t.replace("ञ्ज", "ंज").replace("ञ्च", "ंच")
+    t = t.replace("ग्न", "घ्न")
 
-    # Sibilant equivalences (ष ↔ श)
+    # 2. Sibilant equivalence (Śar pratyāhāra: ष ↔ श)
     t = t.replace("ष", "श")
-    # Retroflex ↔ dental nasal (ण ↔ न)
+
+    # 3. Retroflex ↔ dental nasal equivalence (ण ↔ न)
     t = t.replace("ण", "न")
-    # Semivowel / labial (ब ↔ व in MMS output)
+
+    # 4. Semivowel ↔ labial stop (Pāṇinian ba/va abheda: ब ↔ व)
     t = t.replace("ब", "व")
-    # Halant/schwa cleanup
+
+    # 5. Visarga & post-vocalic aspiration (ASR ending -फ़ or -ह for ः)
+    t = re.sub(r'([अ-ह])फ़\b', r'\1ः', t)
+    t = re.sub(r'([अ-ह])ह\b', r'\1ः', t)
+
+    # 6. Halant / ZWNJ / ZWJ cleanup
     t = t.replace("्\u200d", "").replace("्\u200c", "")
+    t = re.sub(r'्+', '्', t)
     t = re.sub(r'\s+', ' ', t).strip()
     return t
 
@@ -2545,7 +2459,7 @@ def _build_empty_or_silence_response(msg, mantra_id="ganesha"):
         "svara_word_detail": [],
         "duration_ratio": 0.0,
         "dimensions": {
-            "uccharana": {"score": 0.0, "char_sim": 0.0, "word_sim": 0.0, "syl_sim": 0.0, "issues": [msg], "fixes": ["Record in a quiet environment and chant the full Ganesha Shloka clearly."], "praises": []},
+            "uccharana": {"score": 0.0, "char_sim": 0.0, "word_sim": 0.0, "syl_sim": 0.0, "issues": [msg], "fixes": [f"Record in a quiet environment and chant the full {minfo['name']} clearly."], "praises": []},
             "svara": {"score": 0.0, "issues": ["No pitch contour detected in silence"], "fixes": [], "praises": []},
             "laya": {"score": 0.0, "duration_ratio": 0.0, "issues": ["No rhythm detected"], "fixes": [], "praises": []},
             "nada": {"score": 0.0, "issues": ["No vocal timbre detected"], "fixes": [], "praises": []},
@@ -2699,6 +2613,287 @@ def load_audio_safely(path: str, target_sr: int = 16000):
     raise RuntimeError(f"Unsupported audio format in {path}")
 
 
+def refine_canonical_word_slices(
+    canonical_words_meta,
+    ctc_tokens,
+    audio_duration,
+    y_audio=None,
+    sr=16000
+):
+    """
+    Globally aligns canonical words C_0..C_{M-1} to CTC speech tokens T_0..T_{N-1}
+    using monotonic Dynamic Programming, resolving compounds, and refines boundaries:
+    - Expands Word 0 onset backward to natural speech onset (captures initial plosive/vowel).
+    - Expands Word M-1 coda forward to natural decay (captures trailing visarga/vowel decay).
+    - Identifies silence / RMS energy valleys between adjacent words to split gaps cleanly.
+    - Preserves minimum word duration (~200ms) for audible playback.
+    """
+    M = len(canonical_words_meta)
+    N = len(ctc_tokens)
+
+    canon_texts = [w["devanagari"] for w in canonical_words_meta]
+    ref_durs = [max(0.2, float(w.get("end_sec", 1.0) - w.get("start_sec", 0.0))) for w in canonical_words_meta]
+
+    if N == 0:
+        tot_ref = sum(ref_durs)
+        curr_t = 0.1
+        results = []
+        for i, cw in enumerate(canonical_words_meta):
+            dur = (ref_durs[i] / max(1e-6, tot_ref)) * max(0.5, audio_duration - 0.2)
+            results.append({
+                'index': i,
+                'devanagari': cw["devanagari"],
+                'user_start_sec': round(curr_t, 3),
+                'user_end_sec': round(curr_t + dur, 3),
+                'duration_sec': round(dur, 3),
+                'status': 'review',
+                'matched_text': '(interpolated)',
+                'sim': 0.0,
+                's_tok': None,
+                'e_tok': None
+            })
+            curr_t += dur
+        return results
+
+    def calc_token_sim(cw_text, sp_text):
+        c_norm = normalize_sanskrit_phonetic(clean_text(cw_text)).replace(" ", "")
+        c_skel = clean_for_match(cw_text).replace(" ", "")
+        sp_norm = normalize_sanskrit_phonetic(clean_text(sp_text)).replace(" ", "")
+        sp_skel = clean_for_match(sp_text).replace(" ", "")
+
+        s_norm = SequenceMatcher(None, c_norm, sp_norm).ratio()
+        s_skel = SequenceMatcher(None, c_skel, sp_skel).ratio() if (c_skel and sp_skel) else 0.0
+
+        if (c_norm in sp_norm or sp_norm in c_norm) and len(sp_norm) >= 2:
+            s_norm = max(s_norm, 0.75)
+        if (c_skel in sp_skel or sp_skel in c_skel) and len(sp_skel) >= 2:
+            s_skel = max(s_skel, 0.75)
+
+        if cw_text == "ॐ":
+            if any(m in sp_text.lower() for m in ["ॐ", "ओम", "ओम्", "ऊम", "गोम", "om", "oom", "oum", "ऊँ", "ऊ", "ओ"]):
+                return 1.0
+
+        return max(s_norm, s_skel * 0.95)
+
+    dp = np.full((M + 1, N + 1), -1e9)
+    parent = {}
+    dp[0, 0] = 0.0
+
+    for i in range(1, M + 1):
+        cw = canon_texts[i - 1]
+        for end_tok in range(1, N + 1):
+            skip_val = dp[i - 1, end_tok] - 0.08
+            if skip_val > dp[i, end_tok]:
+                dp[i, end_tok] = skip_val
+                parent[(i, end_tok)] = (i - 1, end_tok, None)
+
+            for start_tok in range(max(0, end_tok - 3), end_tok):
+                group_text = " ".join(ctc_tokens[t]['text'] for t in range(start_tok, end_tok))
+                sim = calc_token_sim(cw, group_text)
+
+                prev_best = -1e9
+                prev_best_tok = -1
+                for prev_tok in range(0, start_tok + 1):
+                    val = dp[i - 1, prev_tok]
+                    if val > prev_best:
+                        prev_best = val
+                        prev_best_tok = prev_tok
+
+                if prev_best > -1e8:
+                    cand_val = prev_best + sim
+                    if cand_val > dp[i, end_tok]:
+                        dp[i, end_tok] = cand_val
+                        parent[(i, end_tok)] = (i - 1, prev_best_tok, (start_tok, end_tok - 1, sim, group_text))
+
+    best_end = int(np.argmax(dp[M, :]))
+    curr = (M, best_end)
+    anchors = [None] * M
+
+    while curr in parent:
+        prev_i, prev_tok, match_info = parent[curr]
+        w_idx = curr[0] - 1
+        if match_info is not None and match_info[2] >= 0.35:
+            s_tok, e_tok, sim, txt = match_info
+            anchors[w_idx] = {
+                'start_sec': ctc_tokens[s_tok]['start_sec'],
+                'end_sec': ctc_tokens[e_tok]['end_sec'],
+                'sim': sim,
+                'text': txt,
+                's_tok': s_tok,
+                'e_tok': e_tok
+            }
+        curr = (prev_i, prev_tok)
+
+    # Resolve shared compound token spans
+    for i in range(M - 1):
+        if anchors[i] and anchors[i+1]:
+            if anchors[i]['s_tok'] == anchors[i+1]['s_tok'] and anchors[i]['e_tok'] == anchors[i+1]['e_tok']:
+                tot_r = ref_durs[i] + ref_durs[i+1]
+                ratio_i = ref_durs[i] / max(1e-6, tot_r)
+                s_t = anchors[i]['start_sec']
+                e_t = anchors[i]['end_sec']
+                split_t = s_t + (e_t - s_t) * ratio_i
+                anchors[i]['end_sec'] = split_t
+                anchors[i+1]['start_sec'] = split_t
+
+    final_slices = [None] * M
+    for i in range(M):
+        if anchors[i]:
+            final_slices[i] = [anchors[i]['start_sec'], anchors[i]['end_sec']]
+
+    # First anchored index
+    first_anchored_idx = None
+    for i in range(M):
+        if final_slices[i] is not None:
+            first_anchored_idx = i
+            break
+
+    if first_anchored_idx is None:
+        first_anchored_idx = 0
+        final_slices[0] = [0.1, 0.1 + ref_durs[0]]
+
+    if first_anchored_idx > 0:
+        avail_start = 0.1
+        avail_end = max(avail_start + 0.3, final_slices[first_anchored_idx][0])
+        tot_ref = sum(ref_durs[:first_anchored_idx])
+        curr_t = avail_start
+        for i in range(first_anchored_idx):
+            dur = (ref_durs[i] / max(1e-6, tot_ref)) * (avail_end - avail_start)
+            final_slices[i] = [curr_t, curr_t + dur]
+            curr_t += dur
+
+    # Last anchored index
+    last_anchored_idx = None
+    for i in range(M - 1, -1, -1):
+        if final_slices[i] is not None:
+            last_anchored_idx = i
+            break
+
+    if last_anchored_idx < M - 1:
+        avail_start = final_slices[last_anchored_idx][1]
+        avail_end = max(avail_start + 0.5, audio_duration - 0.1)
+        tot_ref = sum(ref_durs[last_anchored_idx + 1:])
+        curr_t = avail_start
+        for i in range(last_anchored_idx + 1, M):
+            dur = (ref_durs[i] / max(1e-6, tot_ref)) * (avail_end - avail_start)
+            final_slices[i] = [curr_t, curr_t + dur]
+            curr_t += dur
+
+    # Interpolate gaps between anchors
+    i = 0
+    while i < M:
+        if final_slices[i] is None:
+            gap_start_idx = i
+            while i < M and final_slices[i] is None:
+                i += 1
+            gap_end_idx = i
+            prev_end = final_slices[gap_start_idx - 1][1]
+            next_start = final_slices[gap_end_idx][0] if gap_end_idx < M else audio_duration
+
+            if next_start <= prev_end + 0.1:
+                next_start = prev_end + sum(ref_durs[gap_start_idx:gap_end_idx]) * 0.7
+
+            tot_ref = sum(ref_durs[gap_start_idx:gap_end_idx])
+            curr_t = prev_end
+            for k in range(gap_start_idx, gap_end_idx):
+                dur = (ref_durs[k] / max(1e-6, tot_ref)) * (next_start - prev_end)
+                final_slices[k] = [curr_t, curr_t + dur]
+                curr_t += dur
+        else:
+            i += 1
+
+    # Acoustic Boundary Relaxation using audio energy and silence valleys
+    if y_audio is not None and len(y_audio) > 1024:
+        hop = 64
+        rms = librosa.feature.rms(y=y_audio, frame_length=256, hop_length=hop)[0]
+        rms_times = librosa.frames_to_time(np.arange(len(rms)), sr=sr, hop_length=hop)
+
+        def find_energy_valley(t_start, t_end):
+            """Finds time of minimum energy within [t_start, t_end]."""
+            if t_end <= t_start:
+                return t_start
+            m = (rms_times >= t_start) & (rms_times <= t_end)
+            if np.any(m):
+                sub_rms = rms[m]
+                sub_times = rms_times[m]
+                min_i = np.argmin(sub_rms)
+                return float(sub_times[min_i])
+            return 0.5 * (t_start + t_end)
+
+        # 1. Expand Word 0 onset backward to capture initial consonant / vowel onset
+        w0_s, w0_e = final_slices[0]
+        search_back_start = max(0.0, w0_s - 0.20)
+        v0 = find_energy_valley(search_back_start, max(search_back_start + 0.02, w0_s - 0.03))
+        final_slices[0][0] = round(max(0.0, min(w0_s, v0)), 3)
+
+        # 2. Refine inter-word boundaries
+        for k in range(M - 1):
+            e_k = final_slices[k][1]
+            s_next = final_slices[k + 1][0]
+
+            if s_next > e_k:
+                t_valley = find_energy_valley(e_k, s_next)
+                final_slices[k][1] = round(t_valley, 3)
+                final_slices[k + 1][0] = round(t_valley, 3)
+            elif s_next < e_k:
+                t_valley = find_energy_valley(s_next, e_k)
+                final_slices[k][1] = round(t_valley, 3)
+                final_slices[k + 1][0] = round(t_valley, 3)
+            else:
+                t_valley = find_energy_valley(max(0.0, e_k - 0.08), min(audio_duration, e_k + 0.08))
+                final_slices[k][1] = round(t_valley, 3)
+                final_slices[k + 1][0] = round(t_valley, 3)
+
+        # 3. Expand final Word M-1 coda forward to capture trailing vowel decay / visarga
+        w_last_s, w_last_e = final_slices[M - 1]
+        search_forward_end = min(audio_duration, w_last_e + 0.35)
+        v_last = find_energy_valley(max(w_last_s + 0.15, w_last_e + 0.05), search_forward_end)
+        final_slices[M - 1][1] = round(min(audio_duration, max(w_last_e, v_last)), 3)
+
+    min_word_dur = 0.20
+    for i in range(M - 1):
+        s_i, e_i = final_slices[i]
+        s_next, e_next = final_slices[i + 1]
+
+        if e_i < s_i + min_word_dur:
+            e_i = s_i + min_word_dur
+            final_slices[i][1] = round(e_i, 3)
+
+        if s_next < e_i:
+            mid = (e_i + s_next) / 2.0
+            if mid - s_i >= min_word_dur and e_next - mid >= min_word_dur:
+                final_slices[i][1] = round(mid, 3)
+                final_slices[i+1][0] = round(mid, 3)
+            else:
+                final_slices[i][1] = round(s_next, 3) if s_next - s_i >= min_word_dur else round(s_i + min_word_dur, 3)
+                final_slices[i+1][0] = final_slices[i][1]
+                if final_slices[i+1][1] < final_slices[i+1][0] + min_word_dur:
+                    final_slices[i+1][1] = round(final_slices[i+1][0] + min_word_dur, 3)
+
+    if final_slices[M - 1][1] < final_slices[M - 1][0] + min_word_dur:
+        final_slices[M - 1][1] = min(audio_duration, round(final_slices[M - 1][0] + min_word_dur, 3))
+
+    evaluated_words = []
+    for i in range(M):
+        raw_s = round(final_slices[i][0], 3)
+        raw_e = round(final_slices[i][1], 3)
+        dur = round(raw_e - raw_s, 3)
+        evaluated_words.append({
+            'index': i,
+            'devanagari': canon_texts[i],
+            'user_start_sec': raw_s,
+            'user_end_sec': raw_e,
+            'duration_sec': dur,
+            'status': 'acceptable' if (anchors[i] and anchors[i]['sim'] >= 0.50) else 'review',
+            'matched_text': anchors[i]['text'] if anchors[i] else '(interpolated)',
+            'sim': round(anchors[i]['sim'], 2) if anchors[i] else 0.0,
+            's_tok': anchors[i]['s_tok'] if anchors[i] else None,
+            'e_tok': anchors[i]['e_tok'] if anchors[i] else None
+        })
+
+    return evaluated_words
+
+
 def analyze_chant(user_audio_path: str, mantra_id: str = "ganesha") -> dict:
 
     """
@@ -2819,44 +3014,32 @@ def analyze_chant(user_audio_path: str, mantra_id: str = "ganesha") -> dict:
         canonical_words_dev = minfo["default_text"].split()
         canonical_words_iast = ["" for _ in canonical_words_dev]
 
+    canonical_words_meta = bp_json.get("words", [])
+    if not canonical_words_meta:
+        canonical_words_meta = [{"index": k, "devanagari": cw, "start_sec": 0.0, "end_sec": 1.0} for k, cw in enumerate(canonical_words_dev)]
+
+    # Global Dynamic Programming alignment for exact word boundaries
+    refined_slices_trimmed = refine_canonical_word_slices(
+        canonical_words_meta,
+        ctc_words,
+        len(audio_16k) / sr,
+        y_audio=audio_16k,
+        sr=sr
+    )
+
     matched_ctc_by_canon = {}
-    last_matched_start_idx = -1
-    last_matched_start_sec = 0.0
-    for c_idx, cw in enumerate(canonical_words_dev):
-        c_norm = normalize_sanskrit_phonetic(clean_text(cw)).replace(" ", "")
-        c_skel = clean_for_match(cw).replace(" ", "")
-        best_score = 0.0
-        best_span = None
-        for sp in spans:
-            # Strictly preserve monotonic word sequence: later words cannot start before previous words
-            if sp['start_idx'] <= last_matched_start_idx:
-                continue
-            if sp['start_sec'] < last_matched_start_sec - 0.05:
-                continue
-            score = SequenceMatcher(None, c_norm, sp['norm']).ratio() * 100.0
-            if (sp['norm'] in c_norm or c_norm in sp['norm']) and len(sp['norm']) >= 3 and (len(sp['norm']) / max(1, len(c_norm))) >= 0.35:
-                score = max(score, 75.0)
-
-            # Generalized Paninian consonant skeleton matching across all mantras
-            sp_skel = clean_for_match(sp['text']).replace(" ", "")
-            if c_skel and sp_skel:
-                skel_score = SequenceMatcher(None, c_skel, sp_skel).ratio() * 100.0
-                if (c_skel in sp_skel or sp_skel in c_skel) and len(sp_skel) >= 2 and (len(sp_skel) / max(1, len(c_skel))) >= 0.4:
-                    skel_score = max(skel_score, 75.0)
-                score = max(score, skel_score * 0.95)
-
-            # Special case for opening Pranava Om
-            if c_idx == 0 and cw == "ॐ" and sp['start_sec'] < 2.0:
-                if any(m in sp['text'].lower() for m in ["ॐ", "ओम", "ओम्", "ऊम", "गोम", "om", "oom", "oum", "ऊँ", "ऊ", "ओ"]):
-                    score = max(score, 90.0)
-
-            if score > best_score:
-                best_score = score
-                best_span = sp
-        if best_score >= 40.0:
-            matched_ctc_by_canon[c_idx] = {'span': best_span, 'score': best_score}
-            last_matched_start_idx = best_span['start_idx']
-            last_matched_start_sec = best_span['start_sec']
+    for c_idx, rw in enumerate(refined_slices_trimmed):
+        if rw.get('s_tok') is not None and rw.get('sim', 0.0) >= 0.35:
+            matched_ctc_by_canon[c_idx] = {
+                'span': {
+                    'text': rw['matched_text'],
+                    'start_sec': rw['user_start_sec'],
+                    'end_sec': rw['user_end_sec'],
+                    'start_idx': rw['s_tok'],
+                    'end_idx': rw.get('e_tok', rw['s_tok']) + 1
+                },
+                'score': round(rw['sim'] * 100.0, 1)
+            }
 
     active_crop_offset_sec = 0.0
     active_dur = len(audio) / sr
@@ -3045,20 +3228,31 @@ def analyze_chant(user_audio_path: str, mantra_id: str = "ganesha") -> dict:
 
 
     # Local Word & Phonetic Evaluation
+    total_raw_offset_sec = round(user_trim_offset_sec + active_crop_offset_sec, 3)
     phonetic_evaluation_data = {}
     tmp_active_path = None
     try:
         import phonetic_evaluator as pe
         import tempfile
         with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp_act:
-            sf.write(tmp_act.name, audio, sr)
+            sf.write(tmp_act.name, audio_16k, sr)
             tmp_active_path = tmp_act.name
+
+        user_word_boundaries = []
+        for w in refined_slices_trimmed:
+            user_word_boundaries.append({
+                'start_sec': w['user_start_sec'],
+                'end_sec': w['user_end_sec'],
+                'confidence': 0.90 if w['status'] == 'acceptable' else 0.70
+            })
 
         phonetic_res = pe.evaluate_phonetics(
             user_audio_path=tmp_active_path,
             ref_audio_path=os.path.join(BASE_DIR, minfo["audio_file"]),
             annotation_path=os.path.join(BASE_DIR, minfo["config_file"]),
-            precomputed_dtw_wp=None
+            precomputed_dtw_wp=None,
+            user_word_boundaries=user_word_boundaries,
+            user_trim_offset_sec_override=user_trim_offset_sec
         )
         phonetic_evaluation_data = phonetic_res.get("phonetic_evaluation", {})
     except Exception as pe_err:
@@ -3075,78 +3269,7 @@ def analyze_chant(user_audio_path: str, mantra_id: str = "ganesha") -> dict:
             except Exception:
                 pass
 
-    # Total offset of audio passed to pe relative to raw audio
-    total_raw_offset_sec = round(user_trim_offset_sec + active_crop_offset_sec, 3)
-
-    # Adjust word timestamps for total raw audio offset (trim + active crop)
     pe_words_list = phonetic_evaluation_data.get("words", [])
-    if total_raw_offset_sec > 0.0:
-        for pw in pe_words_list:
-            if pw.get("user_start_sec") is not None:
-                pw["user_start_sec"] = round(pw["user_start_sec"] + total_raw_offset_sec, 3)
-                pw["user_end_sec"] = round(pw["user_end_sec"] + total_raw_offset_sec, 3)
-            if pw.get("trimmed_user_start_sec") is not None:
-                pw["trimmed_user_start_sec"] = round(pw["trimmed_user_start_sec"] + total_raw_offset_sec, 3)
-                pw["trimmed_user_end_sec"] = round(pw["trimmed_user_end_sec"] + total_raw_offset_sec, 3)
-
-    # Refine word boundaries using high-precision CTC character anchors
-    # CTC character tokens pin the physical vocalization onset of each word
-    if matched_ctc_by_canon:
-        for i, pw in enumerate(pe_words_list):
-            if i in matched_ctc_by_canon:
-                ctc_span = matched_ctc_by_canon[i]['span']
-                ctc_raw_s = round(ctc_span['start_sec'] + user_trim_offset_sec, 3)
-                ctc_raw_e = round(ctc_span['end_sec'] + user_trim_offset_sec, 3)
-
-                curr_s = pw.get("user_start_sec")
-                curr_e = pw.get("user_end_sec")
-
-                if curr_s is None or curr_e is None or abs(curr_s - ctc_raw_s) > 1.2:
-                    pw["user_start_sec"] = ctc_raw_s
-                    pw["user_end_sec"] = max(ctc_raw_e, round(ctc_raw_s + 0.1, 3))
-                    pw["duration_sec"] = round(pw["user_end_sec"] - pw["user_start_sec"], 3)
-                    try:
-                        ac = pe.compute_local_word_match(
-                            audio_raw, sr, ref_audio, ref_sr,
-                            pw["user_start_sec"], pw["user_end_sec"],
-                            pw.get("ref_start_sec", 0.0), pw.get("ref_end_sec", 1.0)
-                        )
-                        pw["word_match_score"] = round(max(pw.get("word_match_score", 0.0), ac), 1)
-                    except Exception:
-                        pass
-                else:
-                    # Prevent word start from bleeding backward into the previous word
-                    pw["user_start_sec"] = max(curr_s, round(ctc_raw_s - 0.04, 3))
-                    pw["user_end_sec"] = max(curr_e, round(ctc_raw_e, 3))
-                    pw["duration_sec"] = round(pw["user_end_sec"] - pw["user_start_sec"], 3)
-
-                # Clamp previous spoken word end so it never extends past current word's onset
-                if i > 0:
-                    prev_pw = pe_words_list[i-1]
-                    if prev_pw.get("user_end_sec") is not None and prev_pw["user_end_sec"] > ctc_raw_s - 0.02:
-                        prev_pw["user_end_sec"] = round(ctc_raw_s - 0.02, 3)
-                        if prev_pw.get("user_start_sec") is not None:
-                            prev_pw["duration_sec"] = round(max(0.05, prev_pw["user_end_sec"] - prev_pw["user_start_sec"]), 3)
-
-    # Strictly guarantee non-overlapping sequential boundaries across all words
-    for i in range(len(pe_words_list) - 1):
-        curr_pw = pe_words_list[i]
-        next_pw = pe_words_list[i+1]
-        if (curr_pw.get("user_start_sec") is not None and curr_pw.get("user_end_sec") is not None and
-            next_pw.get("user_start_sec") is not None and next_pw.get("user_end_sec") is not None):
-            if curr_pw["user_end_sec"] < curr_pw["user_start_sec"] + 0.05:
-                curr_pw["user_end_sec"] = round(curr_pw["user_start_sec"] + 0.05, 3)
-
-            if next_pw["user_start_sec"] <= curr_pw["user_start_sec"] + 0.05:
-                # Inverted or cramped start: push next word start to after current word
-                next_pw["user_start_sec"] = curr_pw["user_end_sec"]
-                if next_pw["user_end_sec"] < next_pw["user_start_sec"] + 0.05:
-                    next_pw["user_end_sec"] = round(next_pw["user_start_sec"] + 0.05, 3)
-            elif curr_pw["user_end_sec"] > next_pw["user_start_sec"]:
-                curr_pw["user_end_sec"] = next_pw["user_start_sec"]
-
-            curr_pw["duration_sec"] = round(max(0.05, curr_pw["user_end_sec"] - curr_pw["user_start_sec"]), 3)
-            next_pw["duration_sec"] = round(max(0.05, next_pw["user_end_sec"] - next_pw["user_start_sec"]), 3)
 
     # Populate word timestamps from phonetic evaluation
     word_timestamps_data = []
@@ -3166,9 +3289,28 @@ def analyze_chant(user_audio_path: str, mantra_id: str = "ganesha") -> dict:
     ref_syllables  = split_syllables(ref_clean)
     user_syllables = split_syllables(user_clean)
 
-    char_sim = SequenceMatcher(None, ref_clean,  user_clean).ratio()
+    # Space-invariant character similarity (accommodates compound spacing in ASR)
+    ref_nospace = ref_clean.replace(" ", "")
+    user_nospace = user_clean.replace(" ", "")
+    char_sim = max(
+        SequenceMatcher(None, ref_clean, user_clean).ratio(),
+        SequenceMatcher(None, ref_nospace, user_nospace).ratio()
+    )
+
+    # Multi-token n-gram compound word similarity (automatically pairs split compounds without hardcoding)
     if ref_words and user_words:
-        word_sim = sum(max(SequenceMatcher(None, rw, uw).ratio() for uw in user_words) for rw in ref_words) / len(ref_words)
+        user_ngram_words = list(user_words)
+        for w_len in (2, 3, 4, 5):
+            for k in range(len(user_words) - w_len + 1):
+                user_ngram_words.append("".join(user_words[k:k+w_len]))
+        word_sim = sum(
+            max(
+                max(
+                    SequenceMatcher(None, rw, uw).ratio(),
+                    SequenceMatcher(None, clean_for_match(rw), clean_for_match(uw)).ratio() * 0.95
+                ) for uw in user_ngram_words
+            ) for rw in ref_words
+        ) / len(ref_words)
     else:
         word_sim = 0.0
     syl_sim  = SequenceMatcher(None, ref_syllables, user_syllables).ratio()
@@ -3196,14 +3338,24 @@ def analyze_chant(user_audio_path: str, mantra_id: str = "ganesha") -> dict:
         lexical_score = 0.0
         heard_token = ""
 
-        # Candidates include single words and windows up to 5 words
+        # Candidates constrained to word i's localized acoustic window
+        rw = refined_slices_trimmed[i] if i < len(refined_slices_trimmed) else {}
         candidates = []
+        if rw.get('matched_text') and rw['matched_text'] != '(interpolated)':
+            candidates.append(rw['matched_text'])
         if i in matched_ctc_by_canon:
             candidates.append(matched_ctc_by_canon[i]['span']['text'])
-        if user_words:
-            for w_len in (1, 2, 3, 4, 5):
-                for j in range(len(user_words) - w_len + 1):
-                    group = user_words[j:j+w_len]
+
+        w_s_trim = rw.get('user_start_sec', 0.0)
+        w_e_trim = rw.get('user_end_sec', 1.0)
+        overlapping_tokens = [
+            tw['text'] for tw in ctc_words
+            if (tw['start_sec'] < w_e_trim + 0.20 and tw['end_sec'] > w_s_trim - 0.20)
+        ]
+        if overlapping_tokens:
+            for w_len in (1, 2, 3, 4):
+                for j in range(len(overlapping_tokens) - w_len + 1):
+                    group = overlapping_tokens[j:j+w_len]
                     candidates.append("".join(group))
                     candidates.append(" ".join(group))
 
@@ -3229,7 +3381,7 @@ def analyze_chant(user_audio_path: str, mantra_id: str = "ganesha") -> dict:
                 heard_token = cand
 
         user_clean_nospace = user_clean.replace(" ", "")
-        if canon_no_space and canon_no_space in user_clean_nospace:
+        if canon_no_space and canon_no_space in user_clean_nospace and (best_lex >= 35.0 or acoustic_score >= 35.0):
             best_lex = max(best_lex, 95.0)
             if not heard_token:
                 heard_token = canonical_words_dev[i]
