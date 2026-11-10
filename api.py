@@ -2,9 +2,10 @@
 api.py — FastAPI wrapper for compare_chant.py
 Run:  uvicorn api:app --host 0.0.0.0 --port 10000
 """
-from fastapi import FastAPI, File, UploadFile, HTTPException
+from fastapi import FastAPI, File, UploadFile, HTTPException, Form, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, FileResponse
+from typing import Optional
 import tempfile, shutil, os, sys, traceback
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -50,21 +51,39 @@ def health():
     return {"status": "ok"}
 
 
+@app.get("/mantras")
+def list_mantras():
+    """Returns available mantras and their metadata."""
+    cc = get_compare_chant()
+    return JSONResponse(content=list(cc.MANTRAS.values()))
+
+
 @app.get("/reference-audio")
-def reference_audio():
-    """Serves the reference mantra.wav for frontend audio slicing/playback."""
-    audio_path = os.path.join(BASE_DIR, "mantra.wav")
+def reference_audio(mantra_id: str = "ganesha"):
+    """Serves the reference audio for frontend audio slicing/playback."""
+    cc = get_compare_chant()
+    minfo = cc.MANTRAS.get(mantra_id, cc.MANTRAS["ganesha"])
+    audio_path = os.path.join(BASE_DIR, minfo["audio_file"])
     if not os.path.exists(audio_path):
-        raise HTTPException(status_code=404, detail="Reference audio not found")
-    return FileResponse(audio_path, media_type="audio/wav", filename="mantra.wav")
+        raise HTTPException(status_code=404, detail=f"Reference audio not found for {mantra_id}")
+    return FileResponse(audio_path, media_type="audio/wav", filename=minfo["audio_file"])
 
 
 @app.post("/analyze")
-def analyze(file: UploadFile = File(...)):
+def analyze(
+    file: UploadFile = File(...),
+    mantra_id: Optional[str] = Query(None),
+    mantra_id_form: Optional[str] = Form(None, alias="mantra_id")
+):
     """
-    Upload user chant audio → returns full feedback JSON.
+    Upload user chant audio → returns full feedback JSON for the selected mantra.
     """
-    print(f"--> Received /analyze request with file: {file.filename}", flush=True)
+    chosen_mantra = "ganesha"
+    if isinstance(mantra_id_form, str) and mantra_id_form.strip():
+        chosen_mantra = mantra_id_form.strip().lower()
+    elif isinstance(mantra_id, str) and mantra_id.strip():
+        chosen_mantra = mantra_id.strip().lower()
+    print(f"--> Received /analyze request with file: {file.filename}, mantra: {chosen_mantra} (form={mantra_id_form}, query={mantra_id})", flush=True)
     allowed = (".wav", ".mp3", ".mpeg", ".mpga", ".m4a", ".aac", ".ogg", ".flac", ".webm", ".mov", ".mp4", ".m4v", ".3gp")
     if not file.filename.lower().endswith(allowed):
         raise HTTPException(status_code=400, detail=f"Audio file required: {allowed}")
@@ -77,8 +96,8 @@ def analyze(file: UploadFile = File(...)):
 
     try:
         cc = get_compare_chant()
-        print("--> Starting cc.analyze_chant...", flush=True)
-        result = cc.analyze_chant(tmp_path)
+        print(f"--> Starting cc.analyze_chant for mantra: {chosen_mantra}...", flush=True)
+        result = cc.analyze_chant(tmp_path, mantra_id=chosen_mantra)
         print("--> cc.analyze_chant completed successfully!", flush=True)
         return JSONResponse(content=result)
     except Exception as e:

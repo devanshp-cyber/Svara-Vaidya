@@ -1,0 +1,208 @@
+{
+  "mantra": "Maha Mrityunjaya Mantra",
+  "mantra_devanagari": "त्र्यम्बकं यजामहे सुगन्धिं पुष्टिवर्धनम् उर्वारुकमिव बन्धनान् मृत्योर्मुक्षीय मामृतात्",
+  "mantra_iast": "tryambakaṃ yajāmahe sugandhiṃ puṣṭivardhanam urvārukamiva bandhanān mṛtyormukṣīya māmṛtāt",
+  "audio_file": "maha_mrityunjaya_mantra.wav",
+  "words": [
+    {
+      "index": 0,
+      "devanagari": "त्र्यम्बकं",
+      "iast": "tryambakaṃ",
+      "start_sec": 1.0413,
+      "end_sec": 2.0826,
+      "svara_accent": "anudatta",
+      "phonetic_contrasts": []
+    },
+    {
+      "index": 1,
+      "devanagari": "यजामहे",
+      "iast": "yajāmahe",
+      "start_sec": 2.5031,
+      "end_sec": 3.6446,
+      "svara_accent": "udatta",
+      "phonetic_contrasts": [
+        {
+          "contrast_type": "vowel_duration_ratio",
+          "label": "a vs e",
+          "short_vowel_sub_span": [
+            2.5031,
+            2.9026
+          ],
+          "long_vowel_sub_span": [
+            3.0168,
+            3.6446
+          ],
+          "expected_features": {
+            "min_ratio": 1.3,
+            "max_ratio": 4.5
+          }
+        }
+      ]
+    },
+    {
+      "index": 2,
+      "devanagari": "सुगन्धिं",
+      "iast": "sugandhiṃ",
+      "start_sec": 4.6258,
+      "end_sec": 5.607,
+      "svara_accent": "anudatta",
+      "phonetic_contrasts": [
+        {
+          "contrast_type": "consonant_aspiration",
+          "label": "dh",
+          "sub_start_sec": 5.239,
+          "sub_end_sec": 5.5334,
+          "expected_features": {
+            "min_high_freq_ratio": 0.1
+          }
+        }
+      ]
+    },
+    {
+      "index": 3,
+      "devanagari": "पुष्टिवर्धनम्",
+      "iast": "puṣṭivardhanam",
+      "start_sec": 6.0876,
+      "end_sec": 7.6496,
+      "svara_accent": "udatta",
+      "phonetic_contrasts": [
+        {
+          "contrast_type": "retroflex_cluster",
+          "label": "ṭa",
+          "sub_start_sec": 6.5682,
+          "sub_end_sec": 7.1149,
+          "expected_features": {}
+        },
+        {
+          "contrast_type": "consonant_aspiration",
+          "label": "dh",
+          "sub_start_sec": 7.169,
+          "sub_end_sec": 7.6375,
+          "expected_features": {
+            "min_high_freq_ratio": 0.1
+          }
+        }
+      ]
+    },
+    {
+      "index": 4,
+      "devanagari": "उर्वारुकमिव",
+      "iast": "urvārukamiva",
+      "start_sec": 8.9512,
+      "end_sec": 10.2328,
+      "svara_accent": "udatta",
+      "phonetic_contrasts": [
+        {
+          "contrast_type": "vowel_duration_ratio",
+          "label": "u vs ā",
+          "short_vowel_sub_span": [
+            8.9512,
+            9.3997
+          ],
+          "long_vowel_sub_span": [
+            9.5279,
+            10.2328
+          ],
+          "expected_features": {
+            "min_ratio": 1.3,
+            "max_ratio": 4.5
+          }
+        }
+      ]
+    },
+    {
+      "index": 5,
+      "devanagari": "बन्धनान्",
+      "iast": "bandhanān",
+      "start_sec": 10.3529,
+      "end_sec": 11.9349,
+      "svara_accent": "svarita",
+      "phonetic_contrasts": [
+        {
+          "contrast_type": "consonant_aspiration",
+          "label": "dh",
+          "sub_start_sec": 10.9462,
+          "sub_end_sec": 11.4208,
+          "expected_features": {
+            "min_high_freq_ratio": 0.1
+          }
+        },
+        {
+          "contrast_type": "vowel_duration_ratio",
+          "label": "a vs ā",
+          "short_vowel_sub_span": [
+            10.3529,
+            10.9066
+          ],
+          "long_vowel_sub_span": [
+            11.0648,
+            11.9349
+          ],
+          "expected_features": {
+            "min_ratio": 1.3,
+            "max_ratio": 4.5
+          }
+        }
+      ]
+    },
+    {
+      "index": 6,
+      "devanagari": "मृत्योर्मुक्षीय",
+      "iast": "mṛtyormukṣīya",
+      "start_sec": 12.1952,
+      "end_sec": 13.8373,
+      "svara_accent": "anudatta",
+      "phonetic_contrasts": [
+        {
+          "contrast_type": "retroflex_cluster",
+          "label": "ṣa",
+          "sub_start_sec": 13.5089,
+          "sub_end_sec": 13.8373,
+          "expected_features": {}
+        },
+        {
+          "contrast_type": "vowel_duration_ratio",
+          "label": "ṛ vs ī",
+          "short_vowel_sub_span": [
+            12.1952,
+            12.77
+          ],
+          "long_vowel_sub_span": [
+            12.9342,
+            13.8373
+          ],
+          "expected_features": {
+            "min_ratio": 1.3,
+            "max_ratio": 4.5
+          }
+        }
+      ]
+    },
+    {
+      "index": 7,
+      "devanagari": "मामृतात्",
+      "iast": "māmṛtāt",
+      "start_sec": 14.1176,
+      "end_sec": 15.8999,
+      "svara_accent": "udatta",
+      "phonetic_contrasts": [
+        {
+          "contrast_type": "vowel_duration_ratio",
+          "label": "ṛ vs ā",
+          "short_vowel_sub_span": [
+            14.1176,
+            14.7414
+          ],
+          "long_vowel_sub_span": [
+            14.9196,
+            15.8999
+          ],
+          "expected_features": {
+            "min_ratio": 1.3,
+            "max_ratio": 4.5
+          }
+        }
+      ]
+    }
+  ]
+}

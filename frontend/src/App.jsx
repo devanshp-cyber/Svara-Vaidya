@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:10000";
+const API_URL = import.meta.env.VITE_API_URL || "";
 
 // ─── Semantic Theme Colors & Helpers ─────────────────────────────────────────
 const THEME = {
@@ -847,9 +847,53 @@ function extractQuickTimeLPCM(arrayBuffer) {
   }
 }
 
+// ─── Mantra Catalog ──────────────────────────────────────────────────────────
+export const MANTRAS = [
+  {
+    id: "ganesha",
+    name: "Shri Ganesha Shloka",
+    subtitle: "Vakratuṇḍa Mahākāya",
+    icon: "🕉️",
+    badge: "ॐ गं गणपतये नमः · Reference Recitation",
+    line1: "वक्रतुण्ड महाकाय सूर्यकोटि समप्रभ ।",
+    line2: "निर्विघ्नं कुरुमेदेव सर्वकार्येषु सर्वदा ॥",
+    fullDevanagari: "वक्रतुण्ड महाकाय सूर्यकोटि समप्रभ निर्विघ्नं कुरुमेदेव सर्वकार्येषु सर्वदा",
+    iast: "vakratuṇḍa mahākāya sūryakoṭi samaprabha | nirvighnaṃ kuru me deva sarvakāryeṣu sarvadā ||",
+    meaning: "O Lord with the curved trunk and immense radiant body, whose brilliance equals ten million suns, please make all my endeavors free from obstacles, always.",
+    tradition: "Guru-Paramparā Standard"
+  },
+  {
+    id: "mrityunjaya",
+    name: "Maha Mrityunjaya Mantra",
+    subtitle: "Tryambakaṃ Yajāmahe",
+    icon: "🔱",
+    badge: "ॐ नमः शिवाय · Reference Recitation",
+    line1: "त्र्यम्बकं यजामहे सुगन्धिं पुष्टिवर्धनम् ।",
+    line2: "उर्वारुकमिव बन्धनान् मृत्योर्मुक्षीय मामृतात् ॥",
+    fullDevanagari: "त्र्यम्बकं यजामहे सुगन्धिं पुष्टिवर्धनम् उर्वारुकमिव बन्धनान् मृत्योर्मुक्षीय मामृतात्",
+    iast: "tryambakaṃ yajāmahe sugandhiṃ puṣṭivardhanam | urvārukamiva bandhanān mṛtyormukṣīya māmṛtāt ||",
+    meaning: "We worship the Three-Eyed One (Lord Shiva), who is fragrant and who nourishes all beings. As a ripe cucumber is freed from its stem, may we be liberated from death, for the sake of immortality.",
+    tradition: "Rigvedic Chhandas Standard"
+  },
+  {
+    id: "gayatri",
+    name: "Gayatri Mantra",
+    subtitle: "Savitṛ Gāyatrī",
+    icon: "☀️",
+    badge: "ॐ भूर्भुवः स्वः · Reference Recitation",
+    line1: "ॐ भूर्भुवः स्वः तत्सवितुर्वरेण्यं ।",
+    line2: "भर्गो देवस्य धीमहि धियो यो नः प्रचोदयात् ॥",
+    fullDevanagari: "ॐ भूर्भुवः स्वः तत्सवितुर्वरेण्यं भर्गो देवस्य धीमहि धियो यो नः प्रचोदयात्",
+    iast: "oṃ bhūrbhuvaḥ svaḥ tatsaviturvareṇyaṃ | bhargo devasya dhīmahi dhiyo yo naḥ pracodayāt ||",
+    meaning: "We meditate on the supreme radiant splendor of the divine Sun (Savitṛ), the Creator of the universe. May that divine light inspire and illumine our intellect.",
+    tradition: "Rigvedic Gāyatrī Chhandas Standard"
+  }
+];
+
 // ─── Main Application ────────────────────────────────────────────────────────
 export default function App() {
   const [currentPage, setCurrentPage] = useState("studio"); // "studio" | "results"
+  const [selectedMantra, setSelectedMantra] = useState("ganesha");
   const [recording, setRecording] = useState(false);
   const [audioBlob, setAudioBlob] = useState(null);
   const [audioURL, setAudioURL] = useState(null);
@@ -907,7 +951,17 @@ export default function App() {
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
-  const refAudioURL = `${API_URL}/reference-audio`;
+  const currentMantra = MANTRAS.find((m) => m.id === selectedMantra) || MANTRAS[0];
+  const refAudioURL = `${API_URL}/reference-audio?mantra_id=${selectedMantra}`;
+
+  // Reset audio when switching mantras
+  useEffect(() => {
+    if (refAudioElementRef.current) {
+      try { refAudioElementRef.current.pause(); } catch { /* ignore */ }
+      refAudioElementRef.current = null;
+    }
+    setRefPlaying(false);
+  }, [selectedMantra]);
 
   // API Health Check
   useEffect(() => {
@@ -1041,7 +1095,10 @@ export default function App() {
       setUserFullPlaying(false);
     }
 
-    if (!refAudioElementRef.current) {
+    if (!refAudioElementRef.current || refAudioElementRef.current.src !== new URL(refAudioURL, window.location.href).href) {
+      if (refAudioElementRef.current) {
+        try { refAudioElementRef.current.pause(); } catch { /* ignore */ }
+      }
       const a = new Audio(refAudioURL);
       refAudioElementRef.current = a;
       a.onended = () => setRefPlaying(false);
@@ -1247,7 +1304,8 @@ export default function App() {
     try {
       const form = new FormData();
       form.append("file", audioBlob, "user_chant.wav");
-      const resp = await fetch(`${API_URL}/analyze`, {
+      form.append("mantra_id", selectedMantra);
+      const resp = await fetch(`${API_URL}/analyze?mantra_id=${encodeURIComponent(selectedMantra)}`, {
         method: "POST",
         body: form,
         signal: controller.signal
@@ -1576,25 +1634,77 @@ export default function App() {
             />
 
             <div style={{ textAlign: "center" }}>
+              {/* Mantra Selector Pill Tabs */}
               <div
                 style={{
                   display: "inline-flex",
-                  alignItems: "center",
-                  gap: 6,
-                  background: "#FFF7ED",
-                  border: "1px solid #FED7AA",
-                  color: THEME.accentOrange,
+                  background: "#F1ECE1",
+                  padding: 4,
                   borderRadius: 99,
-                  padding: "4px 14px",
-                  fontSize: 11,
-                  fontWeight: 700,
-                  letterSpacing: "0.1em",
-                  textTransform: "uppercase",
-                  marginBottom: 16,
+                  gap: 4,
+                  marginBottom: 20,
+                  boxShadow: "inset 0 1px 3px rgba(0,0,0,0.06)",
                 }}
               >
-                <span>ॐ</span>
-                <span>Shri Ganesha Shloka · Reference Recitation</span>
+                {MANTRAS.map((m) => {
+                  const isSel = m.id === selectedMantra;
+                  return (
+                    <button
+                      key={m.id}
+                      onClick={() => {
+                        if (selectedMantra !== m.id) {
+                          setSelectedMantra(m.id);
+                          setResult(null);
+                          setError(null);
+                        }
+                      }}
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: 8,
+                        padding: "8px 20px",
+                        borderRadius: 99,
+                        border: "none",
+                        background: isSel ? "#FFFFFF" : "transparent",
+                        color: isSel ? THEME.accentOrange : THEME.textSecondary,
+                        fontWeight: isSel ? 700 : 500,
+                        fontSize: 13,
+                        cursor: "pointer",
+                        boxShadow: isSel ? "0 2px 6px rgba(0,0,0,0.08)" : "none",
+                        transition: "all 0.18s ease",
+                      }}
+                    >
+                      <span>{m.icon}</span>
+                      <span>{m.name}</span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              <div
+                style={{
+                  display: "block",
+                  margin: "0 auto 16px",
+                }}
+              >
+                <div
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 6,
+                    background: "#FFF7ED",
+                    border: "1px solid #FED7AA",
+                    color: THEME.accentOrange,
+                    borderRadius: 99,
+                    padding: "4px 14px",
+                    fontSize: 11,
+                    fontWeight: 700,
+                    letterSpacing: "0.1em",
+                    textTransform: "uppercase",
+                  }}
+                >
+                  <span>{currentMantra.badge}</span>
+                </div>
               </div>
 
               {/* Large Glowing Devanagari Verse */}
@@ -1609,8 +1719,8 @@ export default function App() {
                   marginBottom: 10,
                 }}
               >
-                वक्रतुण्ड महाकाय सूर्यकोटि समप्रभ ।<br />
-                निर्विघ्नं कुरु मे देव सर्वकार्येषु सर्वदा ॥
+                {currentMantra.line1}<br />
+                {currentMantra.line2}
               </div>
 
               {/* IAST Transliteration */}
@@ -1624,7 +1734,7 @@ export default function App() {
                   letterSpacing: "0.03em",
                 }}
               >
-                vakratuṇḍa mahākāya sūryakoṭi samaprabha | nirvighnaṃ kuru me deva sarvakāryeṣu sarvadā ||
+                {currentMantra.iast}
               </div>
 
               {/* Meaning Box */}
@@ -1642,7 +1752,7 @@ export default function App() {
                 }}
               >
                 <span style={{ color: THEME.accentOrange, fontWeight: 700 }}>English Meaning: </span>
-                "O Lord with the curved trunk and immense radiant body, whose brilliance equals ten million suns, please make all my endeavors free from obstacles, always."
+                {currentMantra.meaning}
               </div>
 
               {/* Master Reference Audio Playback Button */}
@@ -2181,8 +2291,8 @@ export default function App() {
                       }}
                     >
                       {r.is_valid_mantra
-                        ? `Shri Ganesha Shloka Verified · ${r.matched_words_count ?? 8}/8 Canonical Words Matched`
-                        : `Mantra Verification Gate Alert · ${r.matched_words_count || 0}/8 Words Verified`}
+                        ? `${r.mantra_name || currentMantra.name} Verified · ${r.matched_words_count ?? 8}/${r.word_alignment?.length || 8} Canonical Words Matched`
+                        : `Mantra Verification Gate Alert · ${r.matched_words_count || 0}/${r.word_alignment?.length || 8} Words Verified`}
                     </div>
                     <div style={{ fontSize: 13, color: THEME.textPrimary, marginTop: 4, lineHeight: 1.5, maxWidth: 900 }}>
                       {r.gate_message}
@@ -2793,10 +2903,10 @@ export default function App() {
                           CANONICAL SHLOKA:
                         </div>
                         <div style={{ fontSize: 17, fontWeight: 700, color: THEME.textPrimary, fontFamily: "'Noto Serif Devanagari', serif", lineHeight: 1.5 }}>
-                          वक्रतुण्ड महाकाय सूर्यकोटि समप्रभ निर्विघ्नं कुरुमेदेव सर्वकार्येषु सर्वदा
+                          {r.mantra || currentMantra.fullDevanagari}
                         </div>
                         <div style={{ fontSize: 12, color: THEME.textSecondary, fontStyle: "italic", marginTop: 2 }}>
-                          vakratuṇḍa mahākāya sūryakoṭi samaprabha nirvighnaṃ kuru me deva sarvakāryeṣu sarvadā
+                          {currentMantra.iast}
                         </div>
                       </div>
 
@@ -3349,8 +3459,8 @@ export default function App() {
               </div>
 
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 14, fontSize: 11, color: "#B45309", fontWeight: 600 }}>
-                <span>ॐ गं गणपतये नमः · Vakratuṇḍa Mahākāya</span>
-                <span>Guru-Paramparā Standard</span>
+                <span>{currentMantra.badge}</span>
+                <span>{currentMantra.tradition}</span>
               </div>
             </div>
           )}

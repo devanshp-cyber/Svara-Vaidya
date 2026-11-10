@@ -1,0 +1,237 @@
+{
+  "mantra": "Gayatri Mantra (Savitṛ Gāyatrī)",
+  "mantra_devanagari": "ॐ भूर्भुवः स्वः तत्सवितुर्वरेण्यं भर्गो देवस्य धीमहि धियो यो नः प्रचोदयात्",
+  "mantra_iast": "oṃ bhūrbhuvaḥ svaḥ tatsaviturvareṇyaṃ bhargo devasya dhīmahi dhiyo yo naḥ pracodayāt",
+  "audio_file": "gayatri_mantra.wav",
+  "words": [
+    {
+      "index": 0,
+      "devanagari": "ॐ",
+      "iast": "oṃ",
+      "start_sec": 0.500,
+      "end_sec": 1.221,
+      "svara_accent": "udatta",
+      "phonetic_contrasts": []
+    },
+    {
+      "index": 1,
+      "devanagari": "भूर्भुवः",
+      "iast": "bhūrbhuvaḥ",
+      "start_sec": 1.278,
+      "end_sec": 2.520,
+      "svara_accent": "udatta",
+      "phonetic_contrasts": [
+        {
+          "contrast_type": "consonant_aspiration",
+          "label": "bh",
+          "sub_start_sec": 1.278,
+          "sub_end_sec": 1.450,
+          "expected_features": {
+            "min_high_freq_ratio": 0.10
+          }
+        },
+        {
+          "contrast_type": "vowel_duration_ratio",
+          "label": "u vs ū",
+          "short_vowel_sub_span": [2.100, 2.300],
+          "long_vowel_sub_span": [1.380, 1.850],
+          "expected_features": {
+            "min_ratio": 1.3,
+            "max_ratio": 4.5
+          }
+        }
+      ]
+    },
+    {
+      "index": 2,
+      "devanagari": "स्वः",
+      "iast": "svaḥ",
+      "start_sec": 2.540,
+      "end_sec": 3.120,
+      "svara_accent": "svarita",
+      "phonetic_contrasts": [
+        {
+          "contrast_type": "consonant_aspiration",
+          "label": "ḥ (visarga)",
+          "sub_start_sec": 2.920,
+          "sub_end_sec": 3.120,
+          "expected_features": {
+            "min_high_freq_ratio": 0.10
+          }
+        }
+      ]
+    },
+    {
+      "index": 3,
+      "devanagari": "तत्सवितुर्वरेण्यं",
+      "iast": "tatsaviturvareṇyaṃ",
+      "start_sec": 3.748,
+      "end_sec": 6.882,
+      "svara_accent": "udatta",
+      "phonetic_contrasts": [
+        {
+          "contrast_type": "retroflex_cluster",
+          "label": "ṇya",
+          "sub_start_sec": 6.420,
+          "sub_end_sec": 6.750,
+          "expected_features": {}
+        },
+        {
+          "contrast_type": "vowel_duration_ratio",
+          "label": "a vs e",
+          "short_vowel_sub_span": [3.800, 4.100],
+          "long_vowel_sub_span": [5.350, 5.800],
+          "expected_features": {
+            "min_ratio": 1.2,
+            "max_ratio": 4.5
+          }
+        }
+      ]
+    },
+    {
+      "index": 4,
+      "devanagari": "भर्गो",
+      "iast": "bhargo",
+      "start_sec": 7.397,
+      "end_sec": 8.242,
+      "svara_accent": "udatta",
+      "phonetic_contrasts": [
+        {
+          "contrast_type": "consonant_aspiration",
+          "label": "bh",
+          "sub_start_sec": 7.397,
+          "sub_end_sec": 7.600,
+          "expected_features": {
+            "min_high_freq_ratio": 0.10
+          }
+        },
+        {
+          "contrast_type": "vowel_duration_ratio",
+          "label": "a vs o",
+          "short_vowel_sub_span": [7.480, 7.720],
+          "long_vowel_sub_span": [7.880, 8.242],
+          "expected_features": {
+            "min_ratio": 1.2,
+            "max_ratio": 4.5
+          }
+        }
+      ]
+    },
+    {
+      "index": 5,
+      "devanagari": "देवस्य",
+      "iast": "devasya",
+      "start_sec": 8.349,
+      "end_sec": 9.480,
+      "svara_accent": "anudatta",
+      "phonetic_contrasts": [
+        {
+          "contrast_type": "vowel_duration_ratio",
+          "label": "a vs e",
+          "short_vowel_sub_span": [9.100, 9.450],
+          "long_vowel_sub_span": [8.400, 8.750],
+          "expected_features": {
+            "min_ratio": 1.2,
+            "max_ratio": 4.5
+          }
+        }
+      ]
+    },
+    {
+      "index": 6,
+      "devanagari": "धीमहि",
+      "iast": "dhīmahi",
+      "start_sec": 9.520,
+      "end_sec": 10.481,
+      "svara_accent": "udatta",
+      "phonetic_contrasts": [
+        {
+          "contrast_type": "consonant_aspiration",
+          "label": "dh",
+          "sub_start_sec": 9.520,
+          "sub_end_sec": 9.720,
+          "expected_features": {
+            "min_high_freq_ratio": 0.10
+          }
+        },
+        {
+          "contrast_type": "vowel_duration_ratio",
+          "label": "i vs ī",
+          "short_vowel_sub_span": [10.150, 10.450],
+          "long_vowel_sub_span": [9.600, 9.950],
+          "expected_features": {
+            "min_ratio": 1.2,
+            "max_ratio": 4.5
+          }
+        }
+      ]
+    },
+    {
+      "index": 7,
+      "devanagari": "धियो",
+      "iast": "dhiyo",
+      "start_sec": 11.149,
+      "end_sec": 11.950,
+      "svara_accent": "udatta",
+      "phonetic_contrasts": [
+        {
+          "contrast_type": "consonant_aspiration",
+          "label": "dh",
+          "sub_start_sec": 11.149,
+          "sub_end_sec": 11.350,
+          "expected_features": {
+            "min_high_freq_ratio": 0.10
+          }
+        }
+      ]
+    },
+    {
+      "index": 8,
+      "devanagari": "यो",
+      "iast": "yo",
+      "start_sec": 12.047,
+      "end_sec": 12.481,
+      "svara_accent": "udatta",
+      "phonetic_contrasts": []
+    },
+    {
+      "index": 9,
+      "devanagari": "नः",
+      "iast": "naḥ",
+      "start_sec": 12.517,
+      "end_sec": 12.961,
+      "svara_accent": "anudatta",
+      "phonetic_contrasts": [
+        {
+          "contrast_type": "consonant_aspiration",
+          "label": "ḥ (visarga)",
+          "sub_start_sec": 12.750,
+          "sub_end_sec": 12.961,
+          "expected_features": {
+            "min_high_freq_ratio": 0.10
+          }
+        }
+      ]
+    },
+    {
+      "index": 10,
+      "devanagari": "प्रचोदयात्",
+      "iast": "pracodayāt",
+      "start_sec": 12.979,
+      "end_sec": 15.254,
+      "svara_accent": "svarita",
+      "phonetic_contrasts": [
+        {
+          "contrast_type": "vowel_duration_ratio",
+          "label": "a vs ā",
+          "short_vowel_sub_span": [13.000, 13.250],
+          "long_vowel_sub_span": [13.850, 14.500],
+          "expected_features": {
+            "min_ratio": 1.2,
+            "max_ratio": 4.5
+          }
+        }
+      ]
+    }
+  ]
+}
