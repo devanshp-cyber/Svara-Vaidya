@@ -198,7 +198,7 @@ def _load_references(mantra_id="ganesha"):
     if ref_audio_raw.ndim > 1:
         ref_audio_raw = ref_audio_raw.mean(axis=1)  # stereo to mono
 
-    ref_audio_trimmed, ref_trim_idx = librosa.effects.trim(ref_audio_raw, top_db=30)
+    ref_audio_trimmed, ref_trim_idx = librosa.effects.trim(ref_audio_raw, top_db=45)
     ref_trim_offset_sec = float(ref_trim_idx[0]) / 16000.0
 
     ref_audio = ref_audio_trimmed
@@ -2670,14 +2670,30 @@ def refine_canonical_word_slices(
             s_skel = max(s_skel, 0.75)
 
         if cw_text == "ॐ":
-            if any(m in sp_text.lower() for m in ["ॐ", "ओम", "ओम्", "ऊम", "गोम", "om", "oom", "oum", "ऊँ", "ऊ", "ओ"]):
+            om_full_words = {
+                "ॐ", "ओम", "ओम्", "ऊम", "उम", "औम", "अउम", "आउम", "गोम",
+                "om", "oom", "oum", "aum", "ohm",
+                "ऊँ", "ऊं", "ओं", "ओँ", "ओ", "ऊ", "अम", "अों", "हूँ"
+            }
+            sp_clean = sp_text.lower().strip()
+            if sp_clean in om_full_words:
                 return 1.0
+            om_prefixes = (
+                "ॐ", "ओम", "ओम्", "ऊम", "औम", "अउम", "om", "oom", "oum", "aum",
+                "ऊं", "ओं", "ओँ", "ओ", "ऊ"
+            )
+            if any(sp_clean.startswith(p) for p in om_prefixes) and len(sp_clean) <= 8:
+                return 0.95
+            return 0.0
 
         return max(s_norm, s_skel * 0.95)
 
     dp = np.full((M + 1, N + 1), -1e9)
     parent = {}
     dp[0, 0] = 0.0
+    for i in range(1, M + 1):
+        dp[i, 0] = dp[i - 1, 0] - 0.08
+        parent[(i, 0)] = (i - 1, 0, None)
 
     for i in range(1, M + 1):
         cw = canon_texts[i - 1]
@@ -2687,7 +2703,8 @@ def refine_canonical_word_slices(
                 dp[i, end_tok] = skip_val
                 parent[(i, end_tok)] = (i - 1, end_tok, None)
 
-            for start_tok in range(max(0, end_tok - 3), end_tok):
+            max_tok_lookback = 1 if cw == "ॐ" else 3
+            for start_tok in range(max(0, end_tok - max_tok_lookback), end_tok):
                 group_text = " ".join(ctc_tokens[t]['text'] for t in range(start_tok, end_tok))
                 sim = calc_token_sim(cw, group_text)
 
@@ -2704,6 +2721,21 @@ def refine_canonical_word_slices(
                     if cand_val > dp[i, end_tok]:
                         dp[i, end_tok] = cand_val
                         parent[(i, end_tok)] = (i - 1, prev_best_tok, (start_tok, end_tok - 1, sim, group_text))
+
+            # Compound sharing: allow canonical word i to share token end_tok - 1 with word i - 1
+            cur_tok_text = ctc_tokens[end_tok - 1]['text']
+            sim_single = calc_token_sim(cw, cur_tok_text)
+            c_norm = normalize_sanskrit_phonetic(clean_text(cw)).replace(" ", "")
+            sp_norm = normalize_sanskrit_phonetic(clean_text(cur_tok_text)).replace(" ", "")
+            c_skel = clean_for_match(cw).replace(" ", "")
+            sp_skel = clean_for_match(cur_tok_text).replace(" ", "")
+            is_subword = (c_norm in sp_norm) or (c_skel in sp_skel) or (sp_norm in c_norm) or (sp_skel in c_skel) or (sim_single >= 0.50)
+
+            if is_subword and dp[i - 1, end_tok] > -1e8:
+                cand_val = dp[i - 1, end_tok] + sim_single * 0.98
+                if cand_val > dp[i, end_tok]:
+                    dp[i, end_tok] = cand_val
+                    parent[(i, end_tok)] = (i - 1, end_tok, (end_tok - 1, end_tok - 1, sim_single, cur_tok_text))
 
     best_end = int(np.argmax(dp[M, :]))
     curr = (M, best_end)
@@ -2724,17 +2756,30 @@ def refine_canonical_word_slices(
             }
         curr = (prev_i, prev_tok)
 
-    # Resolve shared compound token spans
-    for i in range(M - 1):
-        if anchors[i] and anchors[i+1]:
-            if anchors[i]['s_tok'] == anchors[i+1]['s_tok'] and anchors[i]['e_tok'] == anchors[i+1]['e_tok']:
-                tot_r = ref_durs[i] + ref_durs[i+1]
-                ratio_i = ref_durs[i] / max(1e-6, tot_r)
-                s_t = anchors[i]['start_sec']
-                e_t = anchors[i]['end_sec']
-                split_t = s_t + (e_t - s_t) * ratio_i
-                anchors[i]['end_sec'] = split_t
-                anchors[i+1]['start_sec'] = split_t
+    # Multi-word compound span partitioning across any group of consecutive words sharing the same token span
+    k = 0
+    while k < M:
+        if anchors[k]:
+            k_end = k
+            while (k_end + 1 < M and anchors[k_end + 1] and
+                   anchors[k_end + 1]['s_tok'] == anchors[k]['s_tok'] and
+                   anchors[k_end + 1]['e_tok'] == anchors[k]['e_tok']):
+                k_end += 1
+
+            if k_end > k:
+                # Group k..k_end share the exact same token span
+                tot_r = sum(ref_durs[j] for j in range(k, k_end + 1))
+                s_t = anchors[k]['start_sec']
+                e_t = anchors[k]['end_sec']
+                curr_t = s_t
+                for j in range(k, k_end + 1):
+                    dur_j = (ref_durs[j] / max(1e-6, tot_r)) * (e_t - s_t)
+                    anchors[j]['start_sec'] = curr_t
+                    anchors[j]['end_sec'] = curr_t + dur_j
+                    curr_t += dur_j
+            k = k_end + 1
+        else:
+            k += 1
 
     final_slices = [None] * M
     for i in range(M):
@@ -2753,12 +2798,13 @@ def refine_canonical_word_slices(
         final_slices[0] = [0.1, 0.1 + ref_durs[0]]
 
     if first_anchored_idx > 0:
-        avail_start = 0.1
-        avail_end = max(avail_start + 0.3, final_slices[first_anchored_idx][0])
+        first_s = final_slices[first_anchored_idx][0]
+        avail_start = min(0.1, max(0.0, first_s - 0.05))
+        avail_end = first_s
         tot_ref = sum(ref_durs[:first_anchored_idx])
         curr_t = avail_start
         for i in range(first_anchored_idx):
-            dur = (ref_durs[i] / max(1e-6, tot_ref)) * (avail_end - avail_start)
+            dur = (ref_durs[i] / max(1e-6, tot_ref)) * max(0.0, avail_end - avail_start)
             final_slices[i] = [curr_t, curr_t + dur]
             curr_t += dur
 
@@ -2826,21 +2872,23 @@ def refine_canonical_word_slices(
         v0 = find_energy_valley(search_back_start, max(search_back_start + 0.02, w0_s - 0.03))
         final_slices[0][0] = round(max(0.0, min(w0_s, v0)), 3)
 
-        # 2. Refine inter-word boundaries
+        # 2. Refine inter-word boundaries by searching for true energy valley between words
         for k in range(M - 1):
             e_k = final_slices[k][1]
             s_next = final_slices[k + 1][0]
 
             if s_next > e_k:
-                t_valley = find_energy_valley(e_k, s_next)
-                final_slices[k][1] = round(t_valley, 3)
-                final_slices[k + 1][0] = round(t_valley, 3)
+                v_start = max(final_slices[k][0] + 0.15, e_k - 0.15)
+                v_end = min(final_slices[k + 1][1] - 0.15, s_next + 0.15)
             elif s_next < e_k:
-                t_valley = find_energy_valley(s_next, e_k)
-                final_slices[k][1] = round(t_valley, 3)
-                final_slices[k + 1][0] = round(t_valley, 3)
+                v_start = max(final_slices[k][0] + 0.15, s_next - 0.15)
+                v_end = min(final_slices[k + 1][1] - 0.15, e_k + 0.15)
             else:
-                t_valley = find_energy_valley(max(0.0, e_k - 0.08), min(audio_duration, e_k + 0.08))
+                v_start = max(final_slices[k][0] + 0.15, e_k - 0.25)
+                v_end = min(final_slices[k + 1][1] - 0.15, e_k + 0.25)
+
+            if v_end > v_start:
+                t_valley = find_energy_valley(v_start, v_end)
                 final_slices[k][1] = round(t_valley, 3)
                 final_slices[k + 1][0] = round(t_valley, 3)
 
@@ -2860,15 +2908,18 @@ def refine_canonical_word_slices(
             final_slices[i][1] = round(e_i, 3)
 
         if s_next < e_i:
-            mid = (e_i + s_next) / 2.0
-            if mid - s_i >= min_word_dur and e_next - mid >= min_word_dur:
-                final_slices[i][1] = round(mid, 3)
-                final_slices[i+1][0] = round(mid, 3)
+            if anchors[i] is None and anchors[i + 1] is not None:
+                final_slices[i][1] = round(s_next, 3)
             else:
-                final_slices[i][1] = round(s_next, 3) if s_next - s_i >= min_word_dur else round(s_i + min_word_dur, 3)
-                final_slices[i+1][0] = final_slices[i][1]
-                if final_slices[i+1][1] < final_slices[i+1][0] + min_word_dur:
-                    final_slices[i+1][1] = round(final_slices[i+1][0] + min_word_dur, 3)
+                mid = (e_i + s_next) / 2.0
+                if mid - s_i >= min_word_dur and e_next - mid >= min_word_dur:
+                    final_slices[i][1] = round(mid, 3)
+                    final_slices[i+1][0] = round(mid, 3)
+                else:
+                    final_slices[i][1] = round(s_next, 3) if s_next - s_i >= min_word_dur else round(s_i + min_word_dur, 3)
+                    final_slices[i+1][0] = final_slices[i][1]
+                    if final_slices[i+1][1] < final_slices[i+1][0] + min_word_dur:
+                        final_slices[i+1][1] = round(final_slices[i+1][0] + min_word_dur, 3)
 
     if final_slices[M - 1][1] < final_slices[M - 1][0] + min_word_dur:
         final_slices[M - 1][1] = min(audio_duration, round(final_slices[M - 1][0] + min_word_dur, 3))
@@ -2931,7 +2982,7 @@ def analyze_chant(user_audio_path: str, mantra_id: str = "ganesha") -> dict:
     if user_dur < 1.0 or max_rms < 0.012 or mean_rms < 0.002:
         return _build_empty_or_silence_response("No audible chanting detected. The recording is silent or too quiet. Please check your microphone.", mantra_id=mantra_id)
 
-    audio_trimmed, user_trim_idx = librosa.effects.trim(audio_raw, top_db=30)
+    audio_trimmed, user_trim_idx = librosa.effects.trim(audio_raw, top_db=45)
     user_trim_offset_sec = float(user_trim_idx[0]) / sr
     audio = preprocess_for_analysis(audio_trimmed, sr)
 
@@ -3358,6 +3409,12 @@ def analyze_chant(user_audio_path: str, mantra_id: str = "ganesha") -> dict:
                     group = overlapping_tokens[j:j+w_len]
                     candidates.append("".join(group))
                     candidates.append(" ".join(group))
+            # Also allow constituent subwords from merged compound tokens
+            for t_txt in overlapping_tokens:
+                if len(t_txt) >= 4:
+                    for sub_l in (2, 3, 4, 5):
+                        for start_pos in range(len(t_txt) - sub_l + 1):
+                            candidates.append(t_txt[start_pos:start_pos+sub_l])
 
         best_lex = 0.0
         c_skel = clean_for_match(canonical_words_dev[i]).replace(" ", "")
@@ -3372,9 +3429,28 @@ def analyze_chant(user_audio_path: str, mantra_id: str = "ganesha") -> dict:
                     skel_ls = max(skel_ls, 80.0)
                 ls = max(ls, skel_ls * 0.95)
 
-            if i == 0 and canonical_words_dev[i] == "ॐ":
-                if any(m in cand.lower() for m in ["ॐ", "ओम", "ओम्", "ऊम", "गोम", "om", "oom", "oum", "ऊँ", "ऊ", "ओ"]):
+            if canonical_words_dev[i] == "ॐ":
+                om_full_words = {
+                    "ॐ", "ओम", "ओम्", "ऊम", "उम", "औम", "अउम", "आउम", "गोम",
+                    "om", "oom", "oum", "aum", "ohm",
+                    "ऊँ", "ऊं", "ओं", "ओँ", "ओ", "ऊ", "अम", "अों", "हूँ"
+                }
+                cand_clean = cand.lower().strip()
+                if cand_clean in om_full_words:
                     ls = max(ls, 95.0)
+                else:
+                    om_prefixes = (
+                        "ॐ", "ओम", "ओम्", "ऊम", "औम", "अउम", "om", "oom", "oum", "aum",
+                        "ऊं", "ओं", "ओँ", "ओ", "ऊ"
+                    )
+                    if any(cand_clean.startswith(p) for p in om_prefixes) and len(cand_clean) <= 8:
+                        ls = max(ls, 95.0)
+
+            # If this canonical word is ॐ, and acoustic resonance is confirmed (>= 25%), ensure it is recognized
+            if canonical_words_dev[i] == "ॐ" and acoustic_score >= 25.0:
+                ls = max(ls, 85.0)
+                if not heard_token:
+                    heard_token = "ॐ"
 
             if ls > best_lex:
                 best_lex = ls
@@ -3396,7 +3472,9 @@ def analyze_chant(user_audio_path: str, mantra_id: str = "ganesha") -> dict:
 
         has_slice = (pe_w.get("user_start_sec") is not None and pe_w.get("user_end_sec") is not None)
         if has_slice:
-            if is_partial_chant and (i not in matched_ctc_by_canon) and (lexical_score < 30.0):
+            if (i not in matched_ctc_by_canon) and (lexical_score < 25.0) and (acoustic_score < 25.0):
+                is_spoken = False
+            elif is_partial_chant and (i not in matched_ctc_by_canon) and (lexical_score < 30.0):
                 is_spoken = False
             else:
                 is_spoken = True
@@ -3453,6 +3531,8 @@ def analyze_chant(user_audio_path: str, mantra_id: str = "ganesha") -> dict:
                 combined = 0.55 * lexical_score + 0.45 * acoustic_score
             elif lexical_score >= 25.0:
                 combined = 0.50 * lexical_score + 0.50 * min(acoustic_score, 50.0)
+            elif acoustic_score >= 25.0:
+                combined = 0.35 * lexical_score + 0.65 * acoustic_score
             else:
                 if len(user_words) > 0:
                     combined = lexical_score * 0.5
@@ -3466,13 +3546,13 @@ def analyze_chant(user_audio_path: str, mantra_id: str = "ganesha") -> dict:
             else:
                 status = "red"
 
-            if text_similarity < 30.0 and lexical_score < 70.0:
+            if text_similarity < 30.0 and lexical_score < 70.0 and acoustic_score < 40.0:
                 status = "red"
                 combined = 0.0
 
             u_slice_start = pe_w.get("user_start_sec", 0.0)
             u_slice_end   = pe_w.get("user_end_sec", 0.0)
-            final_heard_token = heard_token if (lexical_score >= 25.0 or acoustic_score >= 35.0) else ""
+            final_heard_token = heard_token if (lexical_score >= 25.0 or acoustic_score >= 30.0) else ""
 
             if i < len(pe_words_list):
                 if status == "green":
@@ -3481,7 +3561,6 @@ def analyze_chant(user_audio_path: str, mantra_id: str = "ganesha") -> dict:
                     pe_words_list[i]["status"] = "review"
                 elif status == "red":
                     pe_words_list[i]["status"] = "inconclusive"
-                    pe_words_list[i]["word_match_score"] = min(pe_words_list[i].get("word_match_score", 0.0), combined)
 
         word_alignment.append({
             "index": i,

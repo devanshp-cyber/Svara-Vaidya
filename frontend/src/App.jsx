@@ -2535,7 +2535,7 @@ export default function App() {
                     Chronological Word Alignment
                   </div>
                   <div style={{ fontSize: 18, fontWeight: 700, color: THEME.textPrimary, marginTop: 2 }}>
-                    Interactive 8-Word Akṣara & Audio Alignment Map
+                    Interactive {wordAlign.length || 8}-Word Akṣara & Audio Alignment Map
                   </div>
                 </div>
                 <div style={{ fontSize: 12, color: THEME.textMuted }}>
@@ -2778,7 +2778,7 @@ export default function App() {
                       Local Word-by-Word Diagnostics
                     </div>
                     <div style={{ fontSize: 18, fontWeight: 700, color: THEME.textPrimary, marginTop: 2 }}>
-                      8-Word Phonetic Studio (Local DTW & Acoustic Resonance)
+                      {phoneticWords.length || 8}-Word Phonetic Studio (Local DTW & Acoustic Resonance)
                     </div>
                   </div>
                   {r?.phonetic_evaluation?.summary && (

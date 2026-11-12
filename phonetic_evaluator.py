@@ -328,7 +328,7 @@ def compute_local_word_match(
     r_seg = ref_audio[r_s_sample:r_e_sample]
 
     u_rms = float(np.mean(librosa.feature.rms(y=u_seg)[0])) if len(u_seg) > 0 else 0.0
-    if len(u_seg) < 256 or len(r_seg) < 256 or u_rms < 0.008:
+    if len(u_seg) < 256 or len(r_seg) < 256 or u_rms < 0.002:
         return 0.0
 
     # Extract MFCCs — DROP mfcc[0] (overall energy) for speaker loudness independence
@@ -365,10 +365,7 @@ def compute_local_word_match(
     try:
         D, wp = dtw(u_comb, r_comb, metric="euclidean")
         dist = D[-1, -1] / max(1, len(wp))
-        if dist >= 7.5:
-            score = 0.0
-        else:
-            score = float(100.0 * np.exp(-dist / 5.2))
+        score = float(100.0 * np.exp(-dist / 5.2))
         return float(np.clip(score, 0.0, 100.0))
     except Exception:
         return 0.0
@@ -587,15 +584,16 @@ def evaluate_phonetics(
 
     # Load, trim on raw audio first for exact sample offset, then bandpass/denoise
     user_audio_raw, user_sr = librosa.load(user_audio_path, sr=16000)
-    user_audio_trimmed, user_trim_idx = librosa.effects.trim(user_audio_raw, top_db=30)
     if user_trim_offset_sec_override is not None:
         user_trim_offset_sec = float(user_trim_offset_sec_override)
+        user_audio_trimmed = user_audio_raw
     else:
+        user_audio_trimmed, user_trim_idx = librosa.effects.trim(user_audio_raw, top_db=45)
         user_trim_offset_sec = float(user_trim_idx[0]) / user_sr
     user_audio = preprocess_for_analysis(user_audio_trimmed, user_sr)
 
     ref_audio_raw, ref_sr = librosa.load(ref_audio_path, sr=16000)
-    ref_audio_trimmed, ref_trim_idx = librosa.effects.trim(ref_audio_raw, top_db=30)
+    ref_audio_trimmed, ref_trim_idx = librosa.effects.trim(ref_audio_raw, top_db=45)
     ref_trim_offset_sec = float(ref_trim_idx[0]) / ref_sr
     ref_audio = preprocess_for_analysis(ref_audio_trimmed, ref_sr)
 
@@ -733,7 +731,7 @@ def evaluate_phonetics(
 
         # Word status determination
         # Inconclusive ONLY when there is pure silence or essentially zero segment duration
-        if (u_dur * 1000.0) < CONFIG["MIN_SEGMENT_DURATION_MS"] or u_seg_rms < 0.003 or match_score < 15.0 or conf < 0.20:
+        if (u_dur * 1000.0) < CONFIG["MIN_SEGMENT_DURATION_MS"] or u_seg_rms < 0.0015 or match_score < 10.0 or conf < 0.20:
             word_status = "inconclusive"
             inconclusive_count += 1
         elif match_score >= CONFIG["WORD_ACCEPTABLE_THRESHOLD"]:
